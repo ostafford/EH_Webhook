@@ -11,8 +11,9 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
+  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "src/health.ts", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
 }
