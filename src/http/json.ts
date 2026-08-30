@@ -11,9 +11,9 @@ export interface HttpRequest {
 }
 
 export type HttpResponse =
-  | { kind: "success"; status: number; body: unknown }
-  | { kind: "validation"; status: number; body: unknown }
-  | { kind: "client_error"; status: number; body: unknown }
+  | { kind: "success"; status: number; body: unknown; headers: Headers }
+  | { kind: "validation"; status: number; body: unknown; headers: Headers }
+  | { kind: "client_error"; status: number; body: unknown; headers: Headers }
   | { kind: "retryable"; status: number | null; detail: string };
 
 export async function httpJson(
@@ -39,13 +39,14 @@ export async function httpJson(
 
   const text = await res.text();
   const body = text ? safeParse(text) : null;
+  const headers = res.headers;
 
-  if (res.ok) return { kind: "success", status: res.status, body };
-  if (res.status === 422) return { kind: "validation", status: res.status, body };
+  if (res.ok) return { kind: "success", status: res.status, body, headers };
+  if (res.status === 422) return { kind: "validation", status: res.status, body, headers };
   if (res.status === 429 || res.status >= 500) {
     return { kind: "retryable", status: res.status, detail: text.slice(0, 300) };
   }
-  return { kind: "client_error", status: res.status, body };
+  return { kind: "client_error", status: res.status, body, headers };
 }
 
 function safeParse(text: string): unknown {

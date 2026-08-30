@@ -178,9 +178,18 @@ _Rough total: ~3 working weeks for one engineer._
 1. **Prerequisites checklist** (from Q40 + A40): EH Payroll AU + API access;
    single employing entity; Connecteam Onboarding feature with approval; APRA super;
    awards already configured in EH.
-2. **Connecteam setup:** create API key; create the custom publisher "EH Sync";
-   create the admin channel; note the onboarding pack ID; (integration registers
-   the webhook via API with a generated `secretKey`).
+2. **Connecteam setup:** create the API key; create the custom publisher "EH Sync"
+   (Settings → Feed settings) and note its **publisher ID**; create a dedicated
+   **"EH Sync Alerts" channel**, add the admins who should action alerts, and note
+   its conversation ID (`GET /chat/v1/conversations`); note the **onboarding pack
+   ID**. Generate a `CT_WEBHOOK_SECRET` (random). *The webhook itself is registered
+   after deploy — step 8 — because it needs the Worker's live URL.*
+   *Runbook must explain the messaging model here:* the **custom publisher** is the
+   sender of **all** messages; the **Correction message** is a direct message to
+   the employee (and, on the 3rd failed cycle, to the Direct manager); the
+   **Manual-follow-up notice** and **System alert** go to the **alerts channel**.
+   A channel (not per-admin direct messages) so admins can be added/removed without
+   touching config.
 3. **EH Payroll setup:** create API key; disable the employee **setup** email;
    record `businessId`, pay schedule ID, location ID.
 4. **Run `npm run discover`** with both keys → produces `clients/<slug>/field-map.json`
@@ -190,11 +199,15 @@ _Rough total: ~3 working weeks for one engineer._
 6. **Cloudflare:** `wrangler d1 create`, apply migrations, create the queue, set a
    route/custom domain, `wrangler secret put` the three secrets, set vars.
 7. **Deploy** (`wrangler deploy`); confirm `/health`.
-8. **Verify:** approve one test pack → EH create within a minute; edit a field →
+8. **Register the Connecteam webhook** — now that the Worker has a URL. Run
+   `npm run register-webhook` (calls `POST /settings/v1/webhooks` with the
+   deployed `/webhook` URL, feature `users`, and `CT_WEBHOOK_SECRET`), or enter
+   the same three values in the Connecteam UI by hand.
+9. **Verify:** approve one test pack → EH create within a minute; edit a field →
    EH update; enter a bad BSB → correction chat message.
-9. **Go live:** existing approved users flow in via the sweep over the following
-   minutes; monitor `/health` and the admin channel.
-10. **Operations:** what each of the 3 message types means and who acts; how to
+10. **Go live:** existing approved users flow in via the sweep over the following
+    minutes; monitor `/health` and the admin channel.
+11. **Operations:** what each of the 3 message types means and who acts; how to
     replay a DLQ message; rotating keys.
 
 ## 6. Risk register
