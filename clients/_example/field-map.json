@@ -1,0 +1,50 @@
+{
+  "client": "example",
+  "connecteam": { "onboardingPackId": 5474 },
+  "employmentHero": {
+    "businessId": "555455",
+    "payScheduleId": "32407",
+    "locationId": "436590"
+  },
+  "identity": { "externalIdFrom": "userId", "emailFallbackFrom": "email" },
+  "fields": [
+    { "eh": "firstName", "from": { "customFieldId": 42920713 }, "transform": "trimString", "required": true },
+    { "eh": "surname", "from": { "customFieldId": 42920714 }, "transform": "trimString", "required": true },
+    { "eh": "dateOfBirth", "from": { "customFieldId": 25145118 }, "transform": "dateDmyToIso", "required": true },
+    {
+      "eh": "gender",
+      "from": { "customFieldId": 25145119 },
+      "transform": "dropdownValue",
+      "map": { "Male": "Male", "Female": "Female", "Other": "Indeterminate" }
+    },
+    { "eh": "emailAddress", "from": { "userField": "email" }, "transform": "lowerTrim" },
+    { "eh": "mobileNumber", "from": { "userField": "phoneNumber" }, "transform": "phoneAu" },
+    { "eh": "residentialStreetAddress", "from": { "customFieldId": 25145120 }, "transform": "locationStreetLine" },
+    { "eh": "residentialSuburb", "from": { "customFieldId": 42920715 }, "transform": "trimString" },
+    { "eh": "residentialState", "from": { "customFieldId": 42920838 }, "transform": "dropdownValue" },
+    { "eh": "residentialPostcode", "from": { "customFieldId": 42923224 }, "transform": "zeroPad4" },
+    {
+      "eh": "residentialCountry",
+      "from": { "customFieldId": 42920716 },
+      "transform": "locationFull",
+      "map": { "Australia": "AU" },
+      "default": "AU"
+    },
+    { "eh": "startDate", "from": { "customFieldId": 25145109 }, "transform": "dateDmyToIso", "required": true },
+    { "eh": "jobTitle", "from": { "customFieldId": 25145108 }, "transform": "trimString" },
+    {
+      "eh": "employmentType",
+      "from": { "customFieldId": 42920839 },
+      "transform": "dropdownValue",
+      "required": true,
+      "map": { "FullTime": "FullTime", "PartTime": "PartTime", "Casual": "Casual", "LabourHire": "LabourHire" }
+    },
+    { "eh": "emergencyContact1_Name", "from": { "customFieldId": 42708535 }, "transform": "trimString" },
+    { "eh": "emergencyContact1_ContactNumber", "from": { "customFieldId": 42708537 }, "transform": "trimString" },
+    { "eh": "emergencyContact1_Relationship", "from": { "customFieldId": 42708536 }, "transform": "trimString" },
+    { "eh": "taxFileNumber", "from": { "customFieldId": 42923222 }, "transform": "digits", "sensitive": true },
+    { "eh": "bankAccount1_AccountName", "from": { "customFieldId": 42921173 }, "transform": "trimString", "sensitive": true },
+    { "eh": "bankAccount1_BSB", "from": { "customFieldId": 42923223 }, "transform": "zeroPad6", "sensitive": true },
+    { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true }
+  ]
+}
