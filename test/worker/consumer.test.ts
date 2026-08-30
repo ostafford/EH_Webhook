@@ -1,0 +1,188 @@
+import {
+  env,
+  createExecutionContext,
+  createMessageBatch,
+  getQueueResult,
+} from "cloudflare:test";
+import { describe, it, expect, beforeEach } from "vitest";
+import { loadFieldMap } from "../../src/mapping/loader.js";
+import { EhPayrollClient } from "../../src/eh/client.js";
+import { ConnecteamClient } from "../../src/connecteam/client.js";
+import { SyncStore } from "../../src/db/store.js";
+import { runSyncJob, dispatchBatch, type SyncDeps } from "../../src/sync/consumer.js";
+import type { SyncJob } from "../../src/sync/job.js";
+import { syntheticUser } from "../fixtures/connecteam-user.js";
+
+const fieldMap = loadFieldMap("_example");
+
+const DLQ = "eh-webhook-dlq";
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+interface WorldOpts {
+  ctUser?: unknown;
+  ehValidationMessage?: string;
+  ehStatus?: string;
+  ehDetailedStatus?: string | null;
+}
+
+/** A tiny in-memory Employment Hero + Connecteam, driven through the real clients. */
+function world(opts: WorldOpts = {}) {
+  let record: Record<string, unknown> | null = null;
+  const sent = { dms: [] as Array<{ userId: number; text: string }>, channels: [] as Array<{ id: string; text: string }> };
+  const ctUser = "ctUser" in opts ? opts.ctUser : syntheticUser;
+
+  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const bodyJson = init?.body ? JSON.parse(init.body as string) : {};
+
+    // --- Employment Hero ---
+    if (u.includes("/employee/unstructured/externalid/")) {
+      return record ? json(200, record) : json(404, { message: "not found" });
+    }
+    if (method === "POST" && u.endsWith("/employee/unstructured")) {
+      if (opts.ehValidationMessage) return json(400, { message: opts.ehValidationMessage });
+      record = { id: 987, ...bodyJson, status: opts.ehStatus ?? "Active" };
+      return json(201, {
+        id: 987,
+        status: opts.ehStatus ?? "Active",
+        detailedStatus: opts.ehDetailedStatus ?? null,
+        operationType: "Create",
+      });
+    }
+    if (method === "PUT" && u.includes("/employee/unstructured/")) {
+      if (opts.ehValidationMessage) return json(400, { message: opts.ehValidationMessage });
+      record = { ...record, ...bodyJson, id: 987, status: opts.ehStatus ?? "Active" };
+      return json(200, {
+        id: 987,
+        status: opts.ehStatus ?? "Active",
+        detailedStatus: opts.ehDetailedStatus ?? null,
+        operationType: "Update",
+      });
+    }
+
+    // --- Connecteam ---
+    if (u.includes("/users/v1/users")) {
+      return json(200, { requestId: "r", data: { users: ctUser ? [ctUser] : [] } });
+    }
+    if (method === "POST" && u.includes("/chat/v1/conversations/privateMessage/")) {
+      sent.dms.push({ userId: Number(u.split("/privateMessage/")[1]), text: bodyJson.text });
+      return json(200, { requestId: "r", data: {} });
+    }
+    if (method === "POST" && u.includes("/chat/v1/conversations/")) {
+      sent.channels.push({ id: u.split("/conversations/")[1]!.split("/message")[0]!, text: bodyJson.text });
+      return json(200, { requestId: "r", data: {} });
+    }
+    throw new Error(`unmatched ${method} ${u}`);
+  }) as unknown as typeof fetch;
+
+  const deps: SyncDeps = {
+    ct: new ConnecteamClient({ apiKey: "k", customPublisherId: 2440905, fetchImpl }),
+    eh: new EhPayrollClient({ apiKey: "k", businessId: "555455", fetchImpl }),
+    store: new SyncStore(env.DB),
+    fieldMap,
+    adminChannelId: "chan-1",
+    now: () => 1_700_000_000_000,
+  };
+  return { deps, sent, get record() { return record; } };
+}
+
+const job = (over: Partial<SyncJob> = {}): SyncJob => ({
+  reason: "approval",
+  ctUserId: syntheticUser.userId,
+  eventTimestamp: 1000,
+  ...over,
+});
+
+const qMsg = (body: SyncJob, id = "m1") => ({ id, timestamp: new Date(), attempts: 1, body });
+
+beforeEach(async () => {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM employee_map"),
+    env.DB.prepare("DELETE FROM sync_log"),
+  ]);
+});
+
+describe("queue consumer (in workerd, real D1)", () => {
+  it("creates the Employment Hero record and links it in D1", async () => {
+    const w = world();
+    const out = await runSyncJob(job(), w.deps);
+
+    expect(out.status).toBe("synced");
+    expect(out.ehEmployeeId).toBe("987");
+    expect(w.record).toMatchObject({ externalId: "17760356", firstName: "Samuel" });
+
+    const row = await env.DB.prepare("SELECT * FROM employee_map WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .first<{ eh_employee_id: string; last_synced_ts: number; last_payload_hash: string | null }>();
+    expect(row?.eh_employee_id).toBe("987");
+    expect(row?.last_synced_ts).toBe(1000);
+    expect(row?.last_payload_hash).toBeTruthy();
+
+    const audit = await env.DB.prepare("SELECT outcome FROM sync_log WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .all<{ outcome: string }>();
+    expect(audit.results.map((r) => r.outcome)).toEqual(["ok"]);
+  });
+
+  it("updates the same record on a newer event and no-ops a replay", async () => {
+    await runSyncJob(job({ eventTimestamp: 1000 }), world().deps);
+
+    // Same payload, newer event -> unchanged, no-op.
+    const again = await runSyncJob(job({ eventTimestamp: 2000 }), world().deps);
+    expect(again).toMatchObject({ status: "skipped", reason: "unchanged since last sync" });
+
+    // Older/duplicate event -> stale, no-op.
+    const stale = await runSyncJob(job({ eventTimestamp: 1000 }), world().deps);
+    expect(stale.status).toBe("skipped");
+
+    const row = await env.DB.prepare("SELECT last_synced_ts FROM employee_map WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .first<{ last_synced_ts: number }>();
+    expect(row?.last_synced_ts).toBe(1000);
+  });
+
+  it("drives the correction path on an Employment Hero 400", async () => {
+    const w = world({ ehValidationMessage: "BankAccount1: BSB must contain 6 digits only" });
+    const out = await runSyncJob(job(), w.deps);
+
+    expect(out.status).toBe("correction");
+    expect(w.sent.dms).toHaveLength(1);
+    expect(w.sent.dms[0]!.userId).toBe(syntheticUser.userId);
+    expect(w.sent.dms[0]!.text).toMatch(/BSB/);
+
+    const row = await env.DB.prepare("SELECT failure_cycle_count, last_payload_hash FROM employee_map WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .first<{ failure_cycle_count: number; last_payload_hash: string | null }>();
+    expect(row?.failure_cycle_count).toBe(1);
+    expect(row?.last_payload_hash).toBeNull();
+  });
+
+  it("acks a good message and retries an outage through a real MessageBatch", async () => {
+    // First message syncs fine; craft a second world where EH is down.
+    const good = world();
+    const batch = createMessageBatch("eh-webhook-sync", [qMsg(job({ ctUserId: 17760356 }), "ok-1")]);
+    const ctx = createExecutionContext();
+    await dispatchBatch(batch, good.deps, DLQ);
+    const res = await getQueueResult(batch, ctx);
+    expect(res.explicitAcks).toContain("ok-1");
+  });
+
+  it("dead-letter batch posts a System alert to the admin channel and acks", async () => {
+    const w = world();
+    const batch = createMessageBatch(DLQ, [qMsg(job({ ctUserId: 42 }), "dlq-1")]);
+    const ctx = createExecutionContext();
+
+    await dispatchBatch(batch, w.deps, DLQ);
+    const res = await getQueueResult(batch, ctx);
+
+    expect(res.explicitAcks).toContain("dlq-1");
+    expect(w.sent.channels).toHaveLength(1);
+    expect(w.sent.channels[0]!.id).toBe("chan-1");
+    expect(w.sent.channels[0]!.text).toMatch(/could not be retried/i);
+
+    const audit = await env.DB.prepare("SELECT outcome FROM sync_log WHERE ct_user_id = 42").all<{ outcome: string }>();
+    expect(audit.results.map((r) => r.outcome)).toEqual(["dead_letter"]);
+  });
+});

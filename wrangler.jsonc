@@ -36,6 +36,13 @@
         "max_batch_timeout": 5,
         "max_retries": 5,
         "dead_letter_queue": "eh-webhook-dlq"
+      },
+      {
+        // Retry-exhausted jobs land here; the consumer posts a System alert and acks.
+        "queue": "eh-webhook-dlq",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3
       }
     ]
   },

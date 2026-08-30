@@ -1,3 +1,7 @@
+import type { SyncJob } from "./sync/job.js";
+
+export type { SyncJob };
+
 /** Worker bindings. Secrets come from `wrangler secret put`; the rest from wrangler.jsonc `vars`. */
 export interface Env {
   DB: D1Database;
@@ -16,12 +20,4 @@ export interface Env {
   CT_ONBOARDING_PACK_ID: string;
   CT_CUSTOM_PUBLISHER_ID: string;
   ADMIN_CONNECTEAM_CHANNEL_ID: string;
-}
-
-/** A unit of sync work on the queue. Carries identifiers only - never PII. */
-export interface SyncJob {
-  reason: "approval" | "profile_update";
-  ctUserId: number;
-  /** Connecteam event time (epoch ms) for last-write-wins ordering. */
-  eventTimestamp: number;
 }
