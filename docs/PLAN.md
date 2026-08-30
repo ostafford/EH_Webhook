@@ -83,6 +83,20 @@ EH_Webhook/
 
 ## 4. Build milestones (TDD — each ships red→green→refactor with tests)
 
+Tracked as GitHub issues (dependency order, `ready-for-agent`):
+
+| Issue | Milestone | Blocked by |
+|---|---|---|
+| [#2](https://github.com/ostafford/EH_Webhook/issues/2) EH Payroll client | M2 | — |
+| [#3](https://github.com/ostafford/EH_Webhook/issues/3) Connecteam client | M3 | — |
+| [#4](https://github.com/ostafford/EH_Webhook/issues/4) Bundle & load client field-map | M5 (split) | — |
+| [#5](https://github.com/ostafford/EH_Webhook/issues/5) Sync decision, messages & cycles | M4 | #2 |
+| [#6](https://github.com/ostafford/EH_Webhook/issues/6) Queue consumer end-to-end | M5 | #2 #3 #4 #5 |
+| [#7](https://github.com/ostafford/EH_Webhook/issues/7) Cron approval sweep | M6 | #6 #3 |
+| [#8](https://github.com/ostafford/EH_Webhook/issues/8) Inbound webhook | M7 | #6 #3 |
+| [#9](https://github.com/ostafford/EH_Webhook/issues/9) Hardening & handover | M8 | #7 #8 |
+
+
 ### M0 — Skeleton & CI (0.5 day)  ✅
 - Wrangler project (`wrangler.jsonc`), D1 binding + `migrations/0001_init.sql`, Queue
   (producer + consumer + DLQ), 1-min cron, Hono app with `GET /health`.
