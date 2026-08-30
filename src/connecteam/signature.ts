@@ -2,10 +2,13 @@
  * Verifies that an inbound webhook really came from Connecteam, using the
  * `CT_WEBHOOK_SECRET` shared with the webhook registration.
  *
- * @todo #7 - Connecteam does not publish the header name or encoding. The
- * defaults below are the common convention (HMAC-SHA256 of the raw request
- * body, lowercase hex). Confirm against a real delivery in #7 and adjust
- * `DEFAULT_SCHEME` - nothing else needs to change.
+ * Connecteam does not publish the header name or encoding. `DEFAULT_SCHEME`
+ * below is the common convention (HMAC-SHA256 of the raw request body, lowercase
+ * hex, header `x-connecteam-signature`). Confirm against a real delivery when the
+ * webhook is first registered (docs/PLAN.md runbook step 8) and adjust
+ * `DEFAULT_SCHEME` if needed - the verify logic and the /webhook route do not
+ * change. `verifyWebhookSignature` already accepts an override scheme, and the
+ * header name is read from `DEFAULT_SCHEME.header` in src/index.ts.
  */
 export interface SignatureScheme {
   /** Lower-cased HTTP header that carries the signature. */

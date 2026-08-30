@@ -7,6 +7,8 @@ import { ConnecteamClient } from "./connecteam/client.js";
 import { SyncStore } from "./db/store.js";
 import { dispatchBatch, type SyncDeps } from "./sync/consumer.js";
 import { runSweep } from "./cron/sweep.js";
+import { handleWebhook } from "./webhook/inbound.js";
+import { DEFAULT_SCHEME } from "./connecteam/signature.js";
 
 /** Dead-letter queue name (see `dead_letter_queue` in wrangler.jsonc). */
 const DLQ_NAME = "eh-webhook-dlq";
@@ -18,8 +20,28 @@ app.get("/health", async (c) => {
   return c.json(health, health.ok ? 200 : 503);
 });
 
-// Connecteam `user_updated` webhook. Implemented in M7.
-app.post("/webhook", (c) => c.json({ error: "not implemented" }, 501));
+/**
+ * Connecteam `user_updated` webhook. Verify the HMAC, answer immediately, and
+ * enqueue a `profile_update` sync. The signature check + payload parsing are in
+ * src/webhook/inbound.ts; this route only does the enqueue.
+ */
+app.post("/webhook", async (c) => {
+  const rawBody = await c.req.text();
+  const outcome = await handleWebhook({
+    rawBody,
+    signatureHeader: c.req.header(DEFAULT_SCHEME.header),
+    secret: c.env.CT_WEBHOOK_SECRET,
+  });
+
+  if (outcome.job) {
+    try {
+      await c.env.SYNC_QUEUE.send(outcome.job);
+    } catch {
+      return c.json({ error: "could not enqueue" }, 503);
+    }
+  }
+  return c.json(outcome.body, outcome.status as 200 | 202 | 400 | 401 | 500);
+});
 
 app.notFound((c) => c.json({ error: "not found" }, 404));
 
