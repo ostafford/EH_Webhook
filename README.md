@@ -30,23 +30,28 @@ One-way only. Employment Hero is never written back to Connecteam.
 
 ## Status
 
-Design complete. **M1 (field mapping) in progress** — pure transforms, the
-`field-map.json` schema, and full Employment Hero payload assembly are done and
-tested. Cloudflare wiring (M0) and the API clients (M2–M3) are next. See
-`docs/PLAN.md` §4.
+Design complete. **M0 (skeleton) and M1 (field mapping) done.** Next: M2 — the
+Employment Hero Payroll API client (needs a test business). See `docs/PLAN.md` §4.
 
 ## Development
 
 ```sh
 npm install
-npm test            # vitest run
-npm run typecheck   # tsc --noEmit
+npm test                       # vitest (pure logic)
+npm run typecheck              # tsc: node project + worker project
+npx wrangler deploy --dry-run  # build + validate bindings
 ```
 
+- `src/index.ts` — the Worker: `GET /health`, `POST /webhook` (M7), queue consumer
+  (M5), 1-min cron sweep (M6).
 - `src/mapping/` — pure Connecteam → Employment Hero field mapping (no network).
+- `src/db/schema.ts` + `migrations/` — D1: identifiers, sync state, audit log. **No PII.**
 - `clients/<slug>/field-map.json` — the per-client mapping artifact, validated by
   `src/mapping/schema.ts` at start-up. `clients/_example/` is a worked example.
 - `test/fixtures/` — synthetic Connecteam data only; never real employee data.
+
+Config: non-secret IDs in `wrangler.jsonc` `vars`; secrets (`CT_API_KEY`,
+`EH_API_KEY`, `CT_WEBHOOK_SECRET`) via `wrangler secret put`.
 
 Stack: TypeScript · Hono · Cloudflare Workers + Queues + D1 · Drizzle · Vitest.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

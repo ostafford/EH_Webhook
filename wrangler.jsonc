@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eh-webhook",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Non-secret, per-deployment. Fill these from the client's accounts (see docs/RUNBOOK.md).
+  // Secrets are set with `wrangler secret put`: CT_API_KEY, EH_API_KEY, CT_WEBHOOK_SECRET.
+  "vars": {
+    "FIELD_MAP_CLIENT": "_example",
+    "EH_BUSINESS_ID": "",
+    "EH_PAY_SCHEDULE_ID": "",
+    "EH_LOCATION_ID": "",
+    "CT_ONBOARDING_PACK_ID": "",
+    "CT_CUSTOM_PUBLISHER_ID": "",
+    "ADMIN_CONNECTEAM_CHANNEL_ID": ""
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "eh-webhook",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "queues": {
+    "producers": [{ "binding": "SYNC_QUEUE", "queue": "eh-webhook-sync" }],
+    "consumers": [
+      {
+        "queue": "eh-webhook-sync",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "eh-webhook-dlq"
+      }
+    ]
+  },
+
+  "triggers": { "crons": ["* * * * *"] }
+}
