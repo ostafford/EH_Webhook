@@ -12,6 +12,8 @@ export const employeeMap = sqliteTable("employee_map", {
   lastSyncedTs: integer("last_synced_ts"),
   /** Consecutive failed correction cycles; resets to 0 on a successful sync. */
   failureCycleCount: integer("failure_cycle_count").notNull().default(0),
+  /** Hash of the last cleanly-synced mapped payload; NULL after any non-clean outcome. */
+  lastPayloadHash: text("last_payload_hash"),
   updatedAt: integer("updated_at").notNull(),
 });
 
