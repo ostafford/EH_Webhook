@@ -46,8 +46,11 @@ npx wrangler deploy --dry-run  # build + validate bindings
   (M5), 1-min cron sweep (M6).
 - `src/mapping/` — pure Connecteam → Employment Hero field mapping (no network).
 - `src/db/schema.ts` + `migrations/` — D1: identifiers, sync state, audit log. **No PII.**
-- `clients/<slug>/field-map.json` — the per-client mapping artifact, validated by
-  `src/mapping/schema.ts` at start-up. `clients/_example/` is a worked example.
+- `clients/<slug>/field-map.json` — the per-client mapping artifact. Bundled into
+  the Worker via `src/mapping/registry.ts` (one import line per client) and loaded
+  by `src/mapping/loader.ts` for the `FIELD_MAP_CLIENT` this deployment serves; a
+  missing or invalid map fails `/health` with the reason. `clients/_example/` is a
+  worked example.
 - `test/fixtures/` — synthetic Connecteam data only; never real employee data.
 
 Config: non-secret IDs in `wrangler.jsonc` `vars`; secrets (`CT_API_KEY`,

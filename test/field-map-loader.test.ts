@@ -1,0 +1,29 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { loadFieldMap, resetFieldMapCache, FieldMapError } from "../src/mapping/loader.js";
+
+beforeEach(resetFieldMapCache);
+
+describe("loadFieldMap", () => {
+  it("loads and validates the bundled _example map", () => {
+    const map = loadFieldMap("_example");
+    expect(map.client).toBe("example");
+    expect(map.fields.length).toBeGreaterThan(10);
+    expect(map.employmentHero.businessId).toBe("555455");
+  });
+
+  it("memoises the parsed map for the same client", () => {
+    expect(loadFieldMap("_example")).toBe(loadFieldMap("_example"));
+  });
+
+  it("throws a helpful FieldMapError for an unregistered client", () => {
+    try {
+      loadFieldMap("acme");
+      throw new Error("expected loadFieldMap to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(FieldMapError);
+      expect((err as Error).message).toContain('FIELD_MAP_CLIENT="acme"');
+      expect((err as Error).message).toContain("clients/acme/field-map.json");
+      expect((err as Error).message).toContain("_example");
+    }
+  });
+});
