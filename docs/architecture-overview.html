@@ -1,0 +1,441 @@
+<title>Connecteam to Employment Hero Sync</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+
+<style>
+  :root{
+    color-scheme: light dark;
+    --ground:#F5F7F8;
+    --surface:#FFFFFF;
+    --surface-2:#EDF1F2;
+    --ink:#1A2530;
+    --ink-muted:#586470;
+    --hairline:#D9E0E3;
+    --accent:#0E7C7B;
+    --accent-soft:#E0EFEE;
+    --warm:#B26A34;
+    --warm-soft:#F1E7DC;
+    --alert:#B0433A;
+    --alert-soft:#F3E1DF;
+    --amber:#8C6212;
+    --amber-soft:#F0E8D5;
+    --on-accent:#FFFFFF;
+    --shadow: 0 1px 2px rgba(26,37,48,.05), 0 10px 28px rgba(26,37,48,.07);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#10141A;
+      --surface:#191F27;
+      --surface-2:#212A34;
+      --ink:#E7ECF1;
+      --ink-muted:#98A3AF;
+      --hairline:#2B343E;
+      --accent:#43ABA3;
+      --accent-soft:#15302E;
+      --warm:#D0955E;
+      --warm-soft:#2C2317;
+      --alert:#DA766C;
+      --alert-soft:#31201E;
+      --amber:#C69A4F;
+      --amber-soft:#2A2415;
+      --on-accent:#0B1211;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.38);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#10141A;
+    --surface:#191F27;
+    --surface-2:#212A34;
+    --ink:#E7ECF1;
+    --ink-muted:#98A3AF;
+    --hairline:#2B343E;
+    --accent:#43ABA3;
+    --accent-soft:#15302E;
+    --warm:#D0955E;
+    --warm-soft:#2C2317;
+    --alert:#DA766C;
+    --alert-soft:#31201E;
+    --amber:#C69A4F;
+    --amber-soft:#2A2415;
+    --on-accent:#0B1211;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.38);
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size:17px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .page{
+    max-width:46rem;
+    margin:0 auto;
+    padding:clamp(1.75rem, 5vw, 4rem) clamp(1.15rem, 5vw, 2rem) 4rem;
+  }
+
+  .eyebrow{
+    font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:.72rem;
+    font-weight:500;
+    text-transform:uppercase;
+    letter-spacing:.14em;
+    color:var(--ink-muted);
+    margin:0 0 .9rem;
+  }
+
+  h1{
+    font-family:"Newsreader", Georgia, "Times New Roman", serif;
+    font-weight:500;
+    font-size:clamp(1.95rem, 1.4rem + 2.4vw, 2.7rem);
+    line-height:1.15;
+    letter-spacing:-.012em;
+    text-wrap:balance;
+    margin:0 0 .6rem;
+  }
+
+  .lede{
+    font-size:1.075rem;
+    color:var(--ink-muted);
+    margin:0 0 1.6rem;
+    max-width:34rem;
+  }
+
+  h2{
+    font-family:"Newsreader", Georgia, serif;
+    font-weight:600;
+    font-size:1.4rem;
+    letter-spacing:-.005em;
+    text-wrap:balance;
+    margin:2.9rem 0 1rem;
+  }
+
+  h3{
+    font-family:"IBM Plex Sans", sans-serif;
+    font-weight:600;
+    font-size:1rem;
+    margin:0 0 .35rem;
+  }
+
+  p{margin:0 0 1rem}
+  a{color:var(--accent)}
+
+  .chips{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.5rem;
+    margin:0 0 2.4rem;
+    padding:0;
+    list-style:none;
+  }
+  .chips li{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:.75rem;
+    letter-spacing:.02em;
+    color:var(--ink);
+    background:var(--surface-2);
+    border:1px solid var(--hairline);
+    border-radius:999px;
+    padding:.32rem .7rem;
+  }
+
+  .rule{
+    border:0;
+    border-top:1px solid var(--hairline);
+    margin:2.6rem 0 0;
+  }
+
+  /* ---- the flow spine ---- */
+  .flow{margin:1.4rem 0 0}
+  .step{
+    display:grid;
+    grid-template-columns:2.6rem 1fr;
+    column-gap:1.1rem;
+    position:relative;
+    padding-bottom:1.4rem;
+  }
+  .step::before{
+    content:"";
+    position:absolute;
+    left:1.3rem;
+    top:2.9rem;
+    bottom:-.15rem;
+    width:2px;
+    background:var(--hairline);
+    transform:translateX(-1px);
+  }
+  .step:last-child::before{display:none}
+
+  .disc{
+    width:2.6rem;
+    height:2.6rem;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    font-family:"IBM Plex Mono", monospace;
+    font-size:.95rem;
+    font-weight:500;
+    color:var(--on-accent);
+    background:var(--accent);
+    box-shadow:var(--shadow);
+  }
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-radius:var(--radius);
+    padding:1.05rem 1.15rem;
+    box-shadow:var(--shadow);
+  }
+  .step .card{margin-top:.15rem}
+
+  .card .where{
+    font-family:"IBM Plex Mono", monospace;
+    font-size:.7rem;
+    text-transform:uppercase;
+    letter-spacing:.11em;
+    color:var(--ink-muted);
+    display:block;
+    margin-bottom:.5rem;
+  }
+  .card p{margin:0;color:var(--ink-muted);font-size:.95rem}
+  .card p + p{margin-top:.5rem}
+
+  /* the correction branch */
+  .branch{
+    display:grid;
+    grid-template-columns:2.6rem 1fr;
+    column-gap:1.1rem;
+    margin-top:.2rem;
+  }
+  .branch .turn{
+    position:relative;
+  }
+  .branch .turn::before{
+    content:"";
+    position:absolute;
+    left:1.3rem;
+    top:-1.4rem;
+    height:2.4rem;
+    width:2px;
+    background:var(--alert);
+    transform:translateX(-1px);
+  }
+  .branch .turn::after{
+    content:"";
+    position:absolute;
+    left:1.3rem;
+    top:1rem;
+    width:1.1rem;
+    height:2px;
+    background:var(--alert);
+  }
+  .card.problem{
+    background:var(--alert-soft);
+    border-color:color-mix(in srgb, var(--alert) 40%, var(--hairline));
+  }
+  .card.problem .where{color:var(--alert)}
+  .card.problem p{color:var(--ink)}
+
+  /* ---- why grid ---- */
+  .why{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:.9rem;
+    margin-top:1.1rem;
+  }
+  .why .card p{margin-top:.15rem}
+
+  /* ---- messages ---- */
+  .messages{
+    display:grid;
+    gap:.7rem;
+    margin-top:1.1rem;
+  }
+  .msg{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    gap:.55rem 1rem;
+    align-items:start;
+    background:var(--surface);
+    border:1px solid var(--hairline);
+    border-left:3px solid var(--tone, var(--accent));
+    border-radius:10px;
+    padding:.85rem 1rem;
+  }
+  .msg[data-tone="fix"]{--tone:var(--alert)}
+  .msg[data-tone="human"]{--tone:var(--amber)}
+  .msg[data-tone="fault"]{--tone:var(--ink-muted)}
+  .msg .tag{
+    grid-row:1 / span 2;
+    align-self:center;
+    font-family:"IBM Plex Mono", monospace;
+    font-size:.68rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--on-accent);
+    background:var(--tone);
+    border-radius:6px;
+    padding:.28rem .5rem;
+    white-space:nowrap;
+  }
+  .msg strong{font-weight:600}
+  .msg span.body{color:var(--ink-muted);font-size:.93rem}
+
+  .note{
+    font-size:.9rem;
+    color:var(--ink-muted);
+    background:var(--surface-2);
+    border:1px solid var(--hairline);
+    border-radius:10px;
+    padding:.9rem 1.05rem;
+    margin-top:1.1rem;
+  }
+
+  footer{
+    margin-top:3rem;
+    padding-top:1.2rem;
+    border-top:1px solid var(--hairline);
+    font-size:.82rem;
+    color:var(--ink-muted);
+  }
+  footer p{margin:0}
+
+  @media (max-width:34rem){
+    .why{grid-template-columns:1fr}
+    body{font-size:16px}
+  }
+</style>
+
+<div class="page">
+
+  <p class="eyebrow">How it works &amp; why</p>
+  <h1>Employee details, entered once in Connecteam, kept in step with Employment Hero Payroll</h1>
+  <p class="lede">A plain-language walkthrough for the person approving onboarding and watching the alerts &mdash; no technical background needed.</p>
+
+  <ul class="chips">
+    <li>One direction only</li>
+    <li>Runs on its own</li>
+    <li>Checks every minute</li>
+    <li>Bank &amp; TFN never stored</li>
+  </ul>
+
+  <h2>The problem it removes</h2>
+  <p>Today the same personal details are typed twice &mdash; once by the employee in Connecteam, then again by an administrator into Employment Hero Payroll. Re-typing is slow and it is where mistakes creep in. This connector does the second entry automatically, so the employee&rsquo;s answers in Connecteam are the single source of truth.</p>
+
+  <h2>The journey of one person&rsquo;s details</h2>
+
+  <div class="flow">
+
+    <div class="step">
+      <div class="disc">1</div>
+      <div class="card">
+        <span class="where">In Connecteam</span>
+        <h3>The employee fills in their onboarding pack</h3>
+        <p>Name, date of birth, address, emergency contact, bank account, super fund, tax file number and tax questions &mdash; all entered once, by the person they belong to.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="disc">2</div>
+      <div class="card">
+        <span class="where">In Connecteam &middot; a manager</span>
+        <h3>A manager approves the onboarding</h3>
+        <p>Nothing is sent to payroll until this happens. Approval is the green light &mdash; it means a person has looked over the details first.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="disc">3</div>
+      <div class="card">
+        <span class="where">The connector</span>
+        <h3>The connector transfers the details</h3>
+        <p>Within about a minute of approval, it takes each Connecteam answer and puts it in the matching Employment Hero field &mdash; &ldquo;Legal Surname&rdquo; into &ldquo;Surname&rdquo;, and so on.</p>
+        <p>Bank details and the tax file number pass straight through. The connector never keeps a copy of them.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="disc">4</div>
+      <div class="card">
+        <span class="where">In Employment Hero Payroll</span>
+        <h3>The employee record appears &mdash; and stays current</h3>
+        <p>Created the first time. After that, whenever the employee changes something in their Connecteam profile, the same change is made in Employment Hero automatically.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="branch">
+    <div class="turn"></div>
+    <div class="card problem">
+      <span class="where">If Employment Hero rejects something</span>
+      <p>Say a bank BSB that doesn&rsquo;t add up. Employment Hero refuses it, and the employee gets a Connecteam chat message naming exactly what to fix. They correct it in Connecteam, and the connector tries again on its own. The details in Connecteam and Employment Hero never drift apart.</p>
+    </div>
+  </div>
+
+  <h2>Why it&rsquo;s built this way</h2>
+  <div class="why">
+    <div class="card">
+      <h3>Enter once, in Connecteam</h3>
+      <p>The employee already uses Connecteam for onboarding. Asking them to fill it in twice is the exact waste we&rsquo;re removing.</p>
+    </div>
+    <div class="card">
+      <h3>Start only at approval</h3>
+      <p>A half-finished pack shouldn&rsquo;t reach payroll. Tying the sync to the approval you already do means a human has always checked first.</p>
+    </div>
+    <div class="card">
+      <h3>Mistakes go back to the person who made them</h3>
+      <p>The employee sees the problem in Connecteam chat, where they already work, and can fix it themselves in seconds &mdash; no admin ticket, no email thread.</p>
+    </div>
+    <div class="card">
+      <h3>It checks by itself, every minute</h3>
+      <p>No one has to remember to press a button or run a report. Approve the pack and walk away.</p>
+    </div>
+    <div class="card">
+      <h3>Sensitive details are never stored</h3>
+      <p>Bank accounts and tax file numbers travel through the connector and are gone the moment they&rsquo;re delivered. Nothing sensitive sits in the middle.</p>
+    </div>
+    <div class="card">
+      <h3>One direction, on purpose</h3>
+      <p>Connecteam is the source of truth. Employment Hero is never written back to Connecteam, so there&rsquo;s no confusion about which system is right.</p>
+    </div>
+  </div>
+
+  <h2>What you&rsquo;ll see</h2>
+  <p>Three kinds of message can come out of the connector. Knowing which is which tells you who needs to act.</p>
+  <div class="messages">
+    <div class="msg" data-tone="fix">
+      <span class="tag">To the employee</span>
+      <span><strong>&ldquo;Please fix this&rdquo;</strong></span>
+      <span class="body">They mistyped something and Employment Hero wouldn&rsquo;t accept it. They correct it in Connecteam; the connector retries automatically. No action from you.</span>
+    </div>
+    <div class="msg" data-tone="human">
+      <span class="tag">To your alerts channel</span>
+      <span><strong>&ldquo;Needs a person&rdquo;</strong></span>
+      <span class="body">The details are fine, but something has to be set in Employment Hero by hand &mdash; for example a non-resident tax scale, or a self-managed super fund. Payroll finishes it off in Employment Hero.</span>
+    </div>
+    <div class="msg" data-tone="fault">
+      <span class="tag">To your alerts channel</span>
+      <span><strong>&ldquo;Something isn&rsquo;t working&rdquo;</strong></span>
+      <span class="body">A technical fault &mdash; the connector couldn&rsquo;t reach Employment Hero, or a key expired. This is one to pass to whoever maintains the integration.</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Not included, by choice.</strong> Offboarding and terminations, pay rates, and award setup stay manual in Employment Hero for now. They involve payroll judgement that shouldn&rsquo;t be automated in the first version.
+  </div>
+
+  <footer>
+    <p>One-way sync &middot; Connecteam is the source of truth &middot; Bank details and tax file numbers pass straight through and are never stored by the connector &middot; Built as a reusable template &mdash; the same setup works for any business using Connecteam with Employment Hero Payroll.</p>
+  </footer>
+
+</div>
