@@ -42,5 +42,12 @@ export const syntheticUser: ConnecteamUser = {
     { customFieldId: 42921173, type: "str", name: "Name on Bank Account", value: "Samuel Rivera" },
     { customFieldId: 42923223, type: "str", name: "BSB", value: "012-345" },
     { customFieldId: 42921172, type: "str", name: "Account Number", value: "00123456" },
+    { customFieldId: 42923276, type: "dropdown", name: "Claim tax-free threshold?", value: [{ id: 0, value: "Yes" }] },
+    { customFieldId: 42923315, type: "dropdown", name: "Australian resident for tax purposes?", value: [{ id: 0, value: "Yes" }] },
+    { customFieldId: 42923316, type: "dropdown", name: "Have a HELP/STSL study debt?", value: [{ id: 1, value: "No" }] },
+    { customFieldId: 42920803, type: "str", name: "Super Fund USI", value: "HOS0100AU" },
+    { customFieldId: 42920782, type: "str", name: "Super Fund Name", value: "Hostplus" },
+    { customFieldId: 42920783, type: "str", name: "Super Fund ABN", value: "68 657 495 890" },
+    { customFieldId: 42920804, type: "str", name: "Member Number", value: "M123456" },
   ],
 };

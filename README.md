@@ -30,11 +30,23 @@ One-way only. Employment Hero is never written back to Connecteam.
 
 ## Status
 
-Design complete. Implementation not started — see `docs/PLAN.md` §4 for milestones.
+Design complete. **M1 (field mapping) in progress** — pure transforms, the
+`field-map.json` schema, and full Employment Hero payload assembly are done and
+tested. Cloudflare wiring (M0) and the API clients (M2–M3) are next. See
+`docs/PLAN.md` §4.
 
 ## Development
 
-_(pending M0 — scaffold, wrangler config, test harness)_
+```sh
+npm install
+npm test            # vitest run
+npm run typecheck   # tsc --noEmit
+```
+
+- `src/mapping/` — pure Connecteam → Employment Hero field mapping (no network).
+- `clients/<slug>/field-map.json` — the per-client mapping artifact, validated by
+  `src/mapping/schema.ts` at start-up. `clients/_example/` is a worked example.
+- `test/fixtures/` — synthetic Connecteam data only; never real employee data.
 
 Stack: TypeScript · Hono · Cloudflare Workers + Queues + D1 · Drizzle · Vitest.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).

@@ -44,6 +44,34 @@ export const fieldRule = z
   })
   .strict();
 
+const yesNoSource = z.object({ customFieldId: z.number().int().positive() }).strict();
+
+export const rules = z
+  .object({
+    /** Connecteam Yes/No dropdowns that feed the EH tax file declaration. */
+    taxDeclaration: z
+      .object({
+        claimTaxFreeThreshold: yesNoSource,
+        australianResident: yesNoSource,
+        hasHelpOrStslDebt: yesNoSource,
+      })
+      .strict()
+      .optional(),
+    /** Connecteam custom fields holding super fund details (APRA or SMSF). */
+    super: z
+      .object({
+        usiField: z.number().int().positive(),
+        abnField: z.number().int().positive(),
+        fundNameField: z.number().int().positive(),
+        memberNumberField: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
+    /** Fixed values folded verbatim into every payload. */
+    constants: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  })
+  .strict();
+
 export const fieldMap = z
   .object({
     client: z.string().min(1),
@@ -63,11 +91,13 @@ export const fieldMap = z
       .strict()
       .default({ externalIdFrom: "userId", emailFallbackFrom: "email" }),
     fields: z.array(fieldRule).min(1),
+    rules: rules.optional(),
   })
   .strict();
 
 export type FieldMap = z.infer<typeof fieldMap>;
 export type FieldRule = z.infer<typeof fieldRule>;
+export type Rules = z.infer<typeof rules>;
 export type TransformName = z.infer<typeof transform>;
 
 export function parseFieldMap(json: unknown): FieldMap {

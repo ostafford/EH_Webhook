@@ -46,5 +46,22 @@
     { "eh": "bankAccount1_AccountName", "from": { "customFieldId": 42921173 }, "transform": "trimString", "sensitive": true },
     { "eh": "bankAccount1_BSB", "from": { "customFieldId": 42923223 }, "transform": "zeroPad6", "sensitive": true },
     { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true }
-  ]
+  ],
+  "rules": {
+    "taxDeclaration": {
+      "claimTaxFreeThreshold": { "customFieldId": 42923276 },
+      "australianResident": { "customFieldId": 42923315 },
+      "hasHelpOrStslDebt": { "customFieldId": 42923316 }
+    },
+    "super": {
+      "usiField": 42920803,
+      "abnField": 42920783,
+      "fundNameField": 42920782,
+      "memberNumberField": 42920804
+    },
+    "constants": {
+      "bankAccount1_AllocatedPercentage": 100,
+      "isPostalAddressSameAsResidential": true
+    }
+  }
 }
