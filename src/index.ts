@@ -6,6 +6,7 @@ import { EhPayrollClient } from "./eh/client.js";
 import { ConnecteamClient } from "./connecteam/client.js";
 import { SyncStore } from "./db/store.js";
 import { dispatchBatch, type SyncDeps } from "./sync/consumer.js";
+import { runSweep } from "./cron/sweep.js";
 
 /** Dead-letter queue name (see `dead_letter_queue` in wrangler.jsonc). */
 const DLQ_NAME = "eh-webhook-dlq";
@@ -47,8 +48,23 @@ export default {
     await dispatchBatch(batch, buildDeps(env), DLQ_NAME);
   },
 
-  /** 1-minute cron: sweep the Connecteam onboarding API for approvals. Implemented in M6. */
-  async scheduled(_controller, _env): Promise<void> {
-    // no-op until M6
+  /** 1-minute cron: sweep the Connecteam onboarding API and enqueue new approvals. */
+  async scheduled(_controller, env): Promise<void> {
+    const ct = new ConnecteamClient({
+      apiKey: env.CT_API_KEY,
+      customPublisherId: Number(env.CT_CUSTOM_PUBLISHER_ID),
+    });
+    const store = new SyncStore(env.DB);
+
+    await runSweep({
+      packId: Number(env.CT_ONBOARDING_PACK_ID),
+      listAssignments: (packId) => ct.listAssignments(packId),
+      rateLimit: () => ct.lastRateLimit,
+      readState: () => store.readOnboardingState(),
+      writeState: (assignments, seenAt) => store.writeOnboardingState(assignments, seenAt),
+      enqueue: async (jobs) => {
+        await env.SYNC_QUEUE.sendBatch(jobs.map((body) => ({ body })));
+      },
+    });
   },
 } satisfies ExportedHandler<Env, SyncJob>;

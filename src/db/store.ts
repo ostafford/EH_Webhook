@@ -5,13 +5,15 @@
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { employeeMap, syncLog } from "./schema.js";
+import { employeeMap, onboardingState, syncLog } from "./schema.js";
 import type {
   EmployeeLink,
   EmployeeLinkPatch,
   SyncGateway,
   SyncLogEntry,
 } from "../sync/gateway.js";
+import type { OnboardingStateRow } from "../cron/sweep.js";
+import type { OnboardingAssignment } from "../connecteam/types.js";
 
 export class SyncStore implements SyncGateway {
   readonly #db: DrizzleD1Database;
@@ -85,5 +87,43 @@ export class SyncStore implements SyncGateway {
       outcome: entry.outcome,
       detail: entry.detail,
     });
+  }
+
+  // --- cron approval sweep (issue #7) ---
+
+  async readOnboardingState(): Promise<OnboardingStateRow[]> {
+    const rows = await this.#db.select().from(onboardingState);
+    return rows.map((r) => ({
+      assignmentId: r.assignmentId,
+      ctUserId: r.ctUserId,
+      status: r.status,
+      isWaitingApproval: r.isWaitingApproval,
+    }));
+  }
+
+  async writeOnboardingState(
+    assignments: readonly OnboardingAssignment[],
+    seenAt: number,
+  ): Promise<void> {
+    for (const a of assignments) {
+      await this.#db
+        .insert(onboardingState)
+        .values({
+          assignmentId: a.id,
+          ctUserId: a.userId,
+          status: a.status,
+          isWaitingApproval: a.isWaitingApproval,
+          seenAt,
+        })
+        .onConflictDoUpdate({
+          target: onboardingState.assignmentId,
+          set: {
+            ctUserId: a.userId,
+            status: a.status,
+            isWaitingApproval: a.isWaitingApproval,
+            seenAt,
+          },
+        });
+    }
   }
 }
