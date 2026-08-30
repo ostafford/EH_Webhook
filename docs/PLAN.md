@@ -179,10 +179,17 @@ _Rough total: ~3 working weeks for one engineer._
    single employing entity; Connecteam Onboarding feature with approval; APRA super;
    awards already configured in EH.
 2. **Connecteam setup:** create the API key; create the custom publisher "EH Sync"
-   (Settings → Feed settings) and note its **publisher ID**; note the **admin
-   channel ID** (`GET /chat/v1/conversations`); note the **onboarding pack ID**.
-   Generate a `CT_WEBHOOK_SECRET` (random). *The webhook itself is registered
+   (Settings → Feed settings) and note its **publisher ID**; create a dedicated
+   **"EH Sync Alerts" channel**, add the admins who should action alerts, and note
+   its conversation ID (`GET /chat/v1/conversations`); note the **onboarding pack
+   ID**. Generate a `CT_WEBHOOK_SECRET` (random). *The webhook itself is registered
    after deploy — step 8 — because it needs the Worker's live URL.*
+   *Runbook must explain the messaging model here:* the **custom publisher** is the
+   sender of **all** messages; the **Correction message** is a direct message to
+   the employee (and, on the 3rd failed cycle, to the Direct manager); the
+   **Manual-follow-up notice** and **System alert** go to the **alerts channel**.
+   A channel (not per-admin direct messages) so admins can be added/removed without
+   touching config.
 3. **EH Payroll setup:** create API key; disable the employee **setup** email;
    record `businessId`, pay schedule ID, location ID.
 4. **Run `npm run discover`** with both keys → produces `clients/<slug>/field-map.json`

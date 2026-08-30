@@ -4,13 +4,15 @@
  * Sends a chat message only if CT_CUSTOM_PUBLISHER_ID is also set, and only to
  * the account owner.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { ConnecteamClient } from "../src/connecteam/client.js";
 
 const apiKey = process.env.CT_API_KEY;
 const packId = 5474;
 const publisherId = process.env.CT_CUSTOM_PUBLISHER_ID ? Number(process.env.CT_CUSTOM_PUBLISHER_ID) : 0;
+const adminChannelId = process.env.ADMIN_CONNECTEAM_CHANNEL_ID ?? "";
 const live = apiKey ? describe : describe.skip;
+const canSend = publisherId > 0 ? it : it.skip;
 
 live("Connecteam client (live account, read-only)", () => {
   const client = new ConnecteamClient({ apiKey: apiKey!, customPublisherId: publisherId });
@@ -59,5 +61,29 @@ live("Connecteam client (live account, read-only)", () => {
   it("lists chat conversations (to find the admin channel id)", async () => {
     const r = await client.listConversations();
     expect(r.outcome).toBe("ok");
+  });
+
+  describe("live send as the custom publisher", () => {
+    let ownerId = 0;
+
+    beforeAll(async () => {
+      const res = await fetch("https://api.connecteam.com/users/v1/users?limit=1&offset=0", {
+        headers: { "X-API-KEY": apiKey!, accept: "application/json" },
+      });
+      const body = (await res.json()) as { data: { users: { userId: number }[] } };
+      ownerId = body.data.users[0]?.userId ?? 0;
+    });
+
+    canSend("delivers a direct message to a user", async () => {
+      expect(ownerId).toBeGreaterThan(0);
+      const r = await client.sendDirectMessage(ownerId, "EH Sync self-test - direct message path. No action needed.");
+      expect(r).toEqual({ outcome: "ok", data: null });
+    });
+
+    canSend("delivers a message to the admin channel", async () => {
+      expect(adminChannelId).not.toBe("");
+      const r = await client.sendChannelMessage(adminChannelId, "EH Sync self-test - admin channel path. No action needed.");
+      expect(r).toEqual({ outcome: "ok", data: null });
+    });
   });
 });
