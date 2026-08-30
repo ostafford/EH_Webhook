@@ -1,0 +1,141 @@
+/**
+ * Employment Hero Payroll (AU) API client. Narrow surface: look an employee up
+ * by external id, and create-or-update by external id. Auth is HTTP Basic with
+ * the API key as the username. Every call returns an {@link EhResult} so callers
+ * branch on outcome rather than catching.
+ *
+ * Confirmed against the live API (issue #2):
+ *  - GET .../employee/unstructured/externalid/{id}  -> 200 full record, or 404
+ *  - POST .../employee/unstructured                 -> 201 { id, status, detailedStatus, operationType }
+ *  - PUT  .../employee/unstructured/{id}            -> 200 same envelope
+ *  - validation failures are HTTP 400 with { message: "Field: reason\n..." }
+ *  - DELETE .../employee/{id}                       -> 200  (test cleanup only)
+ */
+import { httpJson, type HttpResponse } from "../http/json.js";
+import { parseValidationBody, type EhFieldError } from "./errors.js";
+import type { EhEmployee, EhEmployeePayload, EhWriteResult } from "./types.js";
+
+export type EhResult<T> =
+  | { outcome: "ok"; data: T }
+  | { outcome: "validation"; issues: EhFieldError[]; status: number }
+  | { outcome: "retryable"; status: number | null; detail: string }
+  | { outcome: "client_error"; status: number; detail: string };
+
+export interface EhClientConfig {
+  apiKey: string;
+  businessId: string;
+  /** Defaults to the AU production host. Override for tests. */
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+}
+
+const DEFAULT_BASE = "https://api.yourpayroll.com.au/api/v2";
+
+export class EhPayrollClient {
+  readonly #base: string;
+  readonly #businessId: string;
+  readonly #auth: string;
+  readonly #fetch: typeof fetch;
+
+  constructor(cfg: EhClientConfig) {
+    this.#base = (cfg.baseUrl ?? DEFAULT_BASE).replace(/\/+$/, "");
+    this.#businessId = cfg.businessId;
+    this.#auth = `Basic ${btoa(`${cfg.apiKey}:`)}`;
+    this.#fetch = cfg.fetchImpl ?? fetch;
+  }
+
+  #url(path: string): string {
+    return `${this.#base}/business/${this.#businessId}${path}`;
+  }
+
+  #get(path: string) {
+    return httpJson({ method: "GET", url: this.#url(path), headers: { authorization: this.#auth } }, this.#fetch);
+  }
+
+  #write(method: "POST" | "PUT", path: string, body: EhEmployeePayload) {
+    return httpJson({ method, url: this.#url(path), headers: { authorization: this.#auth }, body }, this.#fetch);
+  }
+
+  async getByExternalId(externalId: string): Promise<EhResult<EhEmployee | null>> {
+    const r = await this.#get(`/employee/unstructured/externalid/${encodeURIComponent(externalId)}`);
+    if (r.kind === "success") return { outcome: "ok", data: (r.body as EhEmployee) ?? null };
+    if (r.kind === "client_error" && r.status === 404) return { outcome: "ok", data: null };
+    return toResult(r);
+  }
+
+  /**
+   * Create the employee if no record carries this external id, otherwise update
+   * the existing one. `externalId` is written into the payload so a fresh create
+   * is linked from the start. Returns the write envelope - call
+   * {@link getByExternalId} afterwards for a field-level read-back.
+   */
+  async upsertByExternalId(
+    externalId: string,
+    payload: EhEmployeePayload,
+  ): Promise<EhResult<EhWriteResult>> {
+    const existing = await this.getByExternalId(externalId);
+    if (existing.outcome !== "ok") return existing;
+
+    const body: EhEmployeePayload = { ...payload, externalId };
+    const created = existing.data === null;
+    const r = created
+      ? await this.#write("POST", `/employee/unstructured`, body)
+      : await this.#write("PUT", `/employee/unstructured/${existing.data!.id}`, body);
+
+    if (r.kind === "success") {
+      const env = (r.body ?? {}) as Record<string, unknown>;
+      return {
+        outcome: "ok",
+        data: {
+          id: typeof env.id === "number" ? env.id : existing.data?.id ?? 0,
+          status: typeof env.status === "string" ? env.status : null,
+          detailedStatus: typeof env.detailedStatus === "string" ? env.detailedStatus : null,
+          operationType: typeof env.operationType === "string" ? env.operationType : null,
+          created,
+        },
+      };
+    }
+    return toResult(r);
+  }
+
+  /** Test-support only: permanently delete an employee. Never used in the sync path. */
+  async deleteEmployee(employeeId: number): Promise<EhResult<null>> {
+    const del = await this.#fetch(this.#url(`/employee/${employeeId}`), {
+      method: "DELETE",
+      headers: { authorization: this.#auth },
+    });
+    return del.ok
+      ? { outcome: "ok", data: null }
+      : { outcome: "client_error", status: del.status, detail: `delete failed (${del.status})` };
+  }
+}
+
+function toResult(r: HttpResponse): EhResult<never> {
+  switch (r.kind) {
+    case "validation":
+      return { outcome: "validation", issues: parseValidationBody(r.body), status: r.status };
+    case "client_error":
+      // EH returns validation failures as 400 with a { message } body.
+      if ((r.status === 400 || r.status === 422) && looksLikeValidation(r.body)) {
+        return { outcome: "validation", issues: parseValidationBody(r.body), status: r.status };
+      }
+      return {
+        outcome: "client_error",
+        status: r.status,
+        detail: typeof r.body === "string" ? r.body : JSON.stringify(r.body).slice(0, 300),
+      };
+    case "retryable":
+      return { outcome: "retryable", status: r.status, detail: r.detail };
+    case "success":
+      return { outcome: "retryable", status: r.status, detail: "unexpected success routed as error" };
+  }
+}
+
+function looksLikeValidation(body: unknown): boolean {
+  if (typeof body === "string") return body.trim() !== "";
+  if (body !== null && typeof body === "object") {
+    const o = body as Record<string, unknown>;
+    return typeof o.message === "string" || typeof o.Message === "string" || Object.values(o).some(Array.isArray);
+  }
+  return false;
+}

@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/mapping", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
+  "include": ["src/mapping", "src/http", "src/eh", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
 }

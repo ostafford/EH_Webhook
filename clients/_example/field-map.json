@@ -18,11 +18,11 @@
       "map": { "Male": "Male", "Female": "Female", "Other": "Indeterminate" }
     },
     { "eh": "emailAddress", "from": { "userField": "email" }, "transform": "lowerTrim" },
-    { "eh": "mobileNumber", "from": { "userField": "phoneNumber" }, "transform": "phoneAu" },
+    { "eh": "mobilePhone", "from": { "userField": "phoneNumber" }, "transform": "phoneAu" },
     { "eh": "residentialStreetAddress", "from": { "customFieldId": 25145120 }, "transform": "locationStreetLine" },
     { "eh": "residentialSuburb", "from": { "customFieldId": 42920715 }, "transform": "trimString" },
     { "eh": "residentialState", "from": { "customFieldId": 42920838 }, "transform": "dropdownValue" },
-    { "eh": "residentialPostcode", "from": { "customFieldId": 42923224 }, "transform": "zeroPad4" },
+    { "eh": "residentialPostCode", "from": { "customFieldId": 42923224 }, "transform": "zeroPad4" },
     {
       "eh": "residentialCountry",
       "from": { "customFieldId": 42920716 },
@@ -60,8 +60,7 @@
       "memberNumberField": 42920804
     },
     "constants": {
-      "bankAccount1_AllocatedPercentage": 100,
-      "isPostalAddressSameAsResidential": true
+      "bankAccount1_AllocatedPercentage": 100
     }
   }
 }

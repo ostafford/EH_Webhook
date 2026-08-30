@@ -52,13 +52,13 @@ describe("applyFieldMap - happy path", () => {
     expect(payload.employmentType).toBe("FullTime");
   });
   it("normalises phone to E.164 and email to lower-case", () => {
-    expect(payload.mobileNumber).toBe("+61411000111");
+    expect(payload.mobilePhone).toBe("+61411000111");
     expect(payload.emailAddress).toBe("sam.rivera@example.com");
   });
   it("takes the street line from the location and pads the postcode", () => {
     expect(payload.residentialStreetAddress).toBe("12 Example Rd");
     expect(payload.residentialSuburb).toBe("Coburg");
-    expect(payload.residentialPostcode).toBe("3058");
+    expect(payload.residentialPostCode).toBe("3058");
   });
   it("maps country via the lookup", () => {
     expect(payload.residentialCountry).toBe("AU");
@@ -67,19 +67,18 @@ describe("applyFieldMap - happy path", () => {
   it("resolves the tax file declaration to booleans", () => {
     expect(payload.claimTaxFreeThreshold).toBe(true);
     expect(payload.australianResident).toBe(true);
-    expect(payload.hasHelpDebt).toBe(false);
-    expect(payload.isNonResident).toBeUndefined();
+    expect(payload.helpDebt).toBe(false);
+    expect(payload.stslDebt).toBe(false);
   });
 
   it("maps an APRA super fund (USI present)", () => {
-    expect(payload.superFund1_USI).toBe("HOS0100AU");
+    expect(payload.superFund1_ProductCode).toBe("HOS0100AU");
     expect(payload.superFund1_FundName).toBe("Hostplus");
     expect(payload.superFund1_MemberNumber).toBe("M123456");
   });
 
   it("folds in constants and the structural config", () => {
     expect(payload.bankAccount1_AllocatedPercentage).toBe(100);
-    expect(payload.isPostalAddressSameAsResidential).toBe(true);
     expect(payload.payScheduleId).toBe("32407");
     expect(payload.locationId).toBe("436590");
     expect(payload.externalId).toBe("17760356");
@@ -152,7 +151,7 @@ describe("applyFieldMap - rules engine", () => {
     const { payload, followUps, issues } = applyFieldMap(u, map);
     expect(issues).toEqual([]);
     expect(payload.australianResident).toBe(false);
-    expect(payload.isNonResident).toBe(true);
+    expect(payload.isNonResident).toBeUndefined();
     expect(followUps).toHaveLength(1);
     expect(followUps[0]).toMatch(/foreign-resident or working-holiday-maker/);
   });
@@ -161,7 +160,7 @@ describe("applyFieldMap - rules engine", () => {
     const u = clone();
     setField(u, 42920803, ""); // clear USI
     const { payload, followUps } = applyFieldMap(u, map);
-    expect(payload.superFund1_USI).toBeUndefined();
+    expect(payload.superFund1_ProductCode).toBeUndefined();
     expect(payload.superFund1_MemberNumber).toBeUndefined();
     expect(followUps).toContain(
       "Self-managed super fund (fund ABN given, no USI) - add the SMSF to the employee in Employment Hero manually.",
@@ -193,7 +192,7 @@ describe("applyFieldMap - rules engine", () => {
     const u = clone();
     setField(u, 42923316, [{ id: 2, value: "Unsure" }]);
     const { issues } = applyFieldMap(u, map);
-    expect(issues[0]!.ehField).toBe("hasHelpDebt");
+    expect(issues[0]!.ehField).toBe("helpDebt");
     expect(issues[0]!.reason).toMatch(/expected "Yes" or "No"/);
   });
 
