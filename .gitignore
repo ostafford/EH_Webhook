@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.wrangler/
+.mf/
+
+# secrets & local config — NEVER commit
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+clients/**/secrets.*
+clients/**/*.local.json
+
+# local D1 / sqlite
+*.sqlite
+*.sqlite-*
+.wrangler/state/
+
+# test / coverage
+coverage/
+*.log
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
