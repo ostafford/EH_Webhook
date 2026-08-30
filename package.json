@@ -1,0 +1,30 @@
+{
+  "name": "eh-webhook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sync employee details from Connecteam into Employment Hero Payroll",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
+    "deploy": "wrangler deploy",
+    "discover": "tsx scripts/discover.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260830.1",
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^4.1.11",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

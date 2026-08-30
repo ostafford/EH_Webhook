@@ -83,12 +83,17 @@ EH_Webhook/
 
 ## 4. Build milestones (TDD — each ships red→green→refactor with tests)
 
-### M0 — Skeleton & CI (0.5 day)
-- Wrangler project, D1 binding + first migration, Queue, cron entry, `/health`.
-- Vitest with workers pool; CI runs unit tests on every push.
-- **Exit:** `wrangler dev` serves `/health`; empty test suite green in CI.
+### M0 — Skeleton & CI (0.5 day)  ✅
+- Wrangler project (`wrangler.jsonc`), D1 binding + `migrations/0001_init.sql`, Queue
+  (producer + consumer + DLQ), 1-min cron, Hono app with `GET /health`.
+- Drizzle schema (`src/db/schema.ts`) — identifiers + audit only, no PII.
+- Vitest (node) for the pure logic; CI (`.github/workflows/ci.yml`) runs typecheck + tests.
+- **Exit:** `wrangler deploy --dry-run` builds and validates all bindings; unit suite green.
+- _Deferred:_ `@cloudflare/vitest-pool-workers` in-workerd tests land with M5, where the
+  queue consumer first needs D1 + bindings under test.
 
-### M1 — Field mapping (pure, no network) (2 days)
+### M1 — Field mapping (pure, no network) (2 days)  ✅
+
 - `field-map.json` schema + loader (fail-fast validation).
 - `transforms.ts`: `DD/MM/YYYY→ISO`, phone normalise, dropdown `[{value}]→value`,
   `location→address`, zero-pad BSB(6)/postcode(4), keep TFN leading zeros.

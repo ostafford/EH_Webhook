@@ -5,6 +5,7 @@ node_modules/
 dist/
 .wrangler/
 .mf/
+worker-configuration.d.ts
 
 # secrets & local config — NEVER commit
 .dev.vars
