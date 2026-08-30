@@ -44,3 +44,10 @@ export const syncLog = sqliteTable(
   },
   (t) => [index("idx_sync_log_user_at").on(t.ctUserId, t.at)],
 );
+
+/** Operational counters and markers surfaced by /health. Counts and timestamps only. */
+export const syncMeta = sqliteTable("sync_meta", {
+  key: text("key").primaryKey(),
+  num: integer("num").notNull().default(0),
+  updatedAt: integer("updated_at").notNull(),
+});

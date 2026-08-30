@@ -26,6 +26,7 @@ const cloneUser = (): ConnecteamUser => structuredClone(syntheticUser);
 function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
   rows: Map<number, EmployeeLink>;
   log: SyncLogEntry[];
+  counters: Map<string, number>;
 } {
   const rows = new Map<number, EmployeeLink>();
   if (seed.ctUserId !== undefined) {
@@ -38,9 +39,14 @@ function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
     });
   }
   const log: SyncLogEntry[] = [];
+  const counters = new Map<string, number>();
   return {
     rows,
     log,
+    counters,
+    async bumpCounter(key: string, delta: number) {
+      counters.set(key, (counters.get(key) ?? 0) + delta);
+    },
     async getEmployeeLink(id) {
       return rows.get(id) ?? null;
     },

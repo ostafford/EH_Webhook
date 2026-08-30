@@ -39,4 +39,6 @@ export interface SyncGateway extends CycleStore {
   getEmployeeLink(ctUserId: number): Promise<EmployeeLink | null>;
   saveEmployeeLink(patch: EmployeeLinkPatch): Promise<void>;
   appendSyncLog(entry: SyncLogEntry): Promise<void>;
+  /** Add `delta` to an operational counter for /health (queue backlog etc.). */
+  bumpCounter(key: string, delta: number): Promise<void>;
 }

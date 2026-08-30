@@ -4,8 +4,8 @@
  * unit tests use a fake gateway instead.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
-import { employeeMap, onboardingState, syncLog } from "./schema.js";
+import { eq, sql } from "drizzle-orm";
+import { employeeMap, onboardingState, syncLog, syncMeta } from "./schema.js";
 import type {
   EmployeeLink,
   EmployeeLinkPatch,
@@ -125,5 +125,36 @@ export class SyncStore implements SyncGateway {
           },
         });
     }
+  }
+
+  // --- operational counters / markers for /health (issue #9) ---
+
+  /** Add `delta` to a counter, creating it at `delta` if absent. */
+  async bumpCounter(key: string, delta: number): Promise<void> {
+    if (delta === 0) return;
+    const now = Date.now();
+    await this.#db
+      .insert(syncMeta)
+      .values({ key, num: delta, updatedAt: now })
+      .onConflictDoUpdate({
+        target: syncMeta.key,
+        set: { num: sql`${syncMeta.num} + ${delta}`, updatedAt: now },
+      });
+  }
+
+  /** Set a marker to an absolute value (e.g. a "last ok" timestamp). */
+  async setMarker(key: string, value: number): Promise<void> {
+    const now = Date.now();
+    await this.#db
+      .insert(syncMeta)
+      .values({ key, num: value, updatedAt: now })
+      .onConflictDoUpdate({ target: syncMeta.key, set: { num: value, updatedAt: now } });
+  }
+
+  /** Read named counters/markers; missing keys come back as 0. */
+  async readMeta(keys: string[]): Promise<Record<string, number>> {
+    const rows = await this.#db.select().from(syncMeta);
+    const found = new Map(rows.map((r) => [r.key, r.num]));
+    return Object.fromEntries(keys.map((k) => [k, found.get(k) ?? 0]));
   }
 }
