@@ -10,13 +10,16 @@ import type { ConnecteamUser, MappingIssue, PayloadValue } from "./apply.js";
 import { yesNo, trimString, TransformError } from "./transforms.js";
 import type { Rules } from "./schema.js";
 
-/** @todo M2 - confirm each of these against the real EH unstructured model. */
+/** Confirmed against the live EH unstructured model in issue #2. */
 export const EH_FIELD = {
   claimTaxFreeThreshold: "claimTaxFreeThreshold",
   australianResident: "australianResident",
-  isNonResident: "isNonResident",
-  hasHelpDebt: "hasHelpDebt",
-  superUsi: "superFund1_USI",
+  // EH has separate helpDebt / stslDebt flags; Connecteam asks one combined
+  // Yes/No, so we set both (over-reporting is harmless - same repayment schedule;
+  // under-reporting would under-withhold).
+  helpDebt: "helpDebt",
+  stslDebt: "stslDebt",
+  superProductCode: "superFund1_ProductCode", // APRA fund USI / product code
   superFundName: "superFund1_FundName",
   superMemberNumber: "superFund1_MemberNumber",
 } as const;
@@ -75,14 +78,16 @@ export function applyTaxDeclaration(
   const resident = readBool(EH_FIELD.australianResident, td.australianResident.customFieldId);
   if (resident !== undefined) {
     out.fields[EH_FIELD.australianResident] = resident;
-    if (!resident) {
-      out.fields[EH_FIELD.isNonResident] = true;
-      out.followUps.push(FOLLOW_UP.nonResident);
-    }
+    // EH has no isNonResident field - australianResident:false plus a manual
+    // follow-up (tax scale / working-holiday-maker is a payroll decision).
+    if (!resident) out.followUps.push(FOLLOW_UP.nonResident);
   }
 
-  const help = readBool(EH_FIELD.hasHelpDebt, td.hasHelpOrStslDebt.customFieldId);
-  if (help !== undefined) out.fields[EH_FIELD.hasHelpDebt] = help;
+  const help = readBool(EH_FIELD.helpDebt, td.hasHelpOrStslDebt.customFieldId);
+  if (help !== undefined) {
+    out.fields[EH_FIELD.helpDebt] = help;
+    out.fields[EH_FIELD.stslDebt] = help;
+  }
 
   return out;
 }
@@ -100,11 +105,11 @@ export function applySuper(user: ConnecteamUser, sup: NonNullable<Rules>["super"
   const hasAbn = !blank(abn.value);
 
   if (hasUsi) {
-    // APRA-regulated fund.
+    // APRA-regulated fund. EH calls the USI the "product code".
     try {
-      out.fields[EH_FIELD.superUsi] = trimString(usi.value);
+      out.fields[EH_FIELD.superProductCode] = trimString(usi.value);
     } catch (err) {
-      out.issues.push({ ehField: EH_FIELD.superUsi, source: usi.label, reason: err instanceof TransformError ? err.message : String(err) });
+      out.issues.push({ ehField: EH_FIELD.superProductCode, source: usi.label, reason: err instanceof TransformError ? err.message : String(err) });
     }
     if (!blank(fundName.value)) out.fields[EH_FIELD.superFundName] = trimString(fundName.value);
     if (blank(memberNumber.value)) {

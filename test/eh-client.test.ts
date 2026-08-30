@@ -63,14 +63,19 @@ describe("EhPayrollClient.getByExternalId", () => {
 });
 
 describe("EhPayrollClient.upsertByExternalId", () => {
+  const CREATE_ENVELOPE = { id: 987, status: "Incomplete", detailedStatus: "Basic Details are incomplete", operationType: "Create" };
+
   it("POSTs a create when no record has the external id, injecting externalId", async () => {
     const f = fakeFetch({
       "GET /externalid/17760356": { status: 404 },
-      "POST /employee/unstructured": { status: 200, body: { ...EMP } },
+      "POST /employee/unstructured": { status: 201, body: CREATE_ENVELOPE },
     });
     const c = new EhPayrollClient(cfg(f));
     const r = await c.upsertByExternalId("17760356", { firstName: "Samuel", surname: "Rivera" });
-    expect(r).toEqual({ outcome: "ok", data: EMP });
+    expect(r).toEqual({
+      outcome: "ok",
+      data: { id: 987, status: "Incomplete", detailedStatus: "Basic Details are incomplete", operationType: "Create", created: true },
+    });
 
     const calls = (f as unknown as ReturnType<typeof vi.fn>).mock.calls;
     const [postUrl, postInit] = calls[1]!;
@@ -81,23 +86,29 @@ describe("EhPayrollClient.upsertByExternalId", () => {
   it("PUTs an update to the existing employee id when the external id resolves", async () => {
     const f = fakeFetch({
       "GET /externalid/17760356": { status: 200, body: EMP },
-      "PUT /employee/unstructured/987": { status: 200, body: { ...EMP, surname: "Rivera-Chen" } },
+      "PUT /employee/unstructured/987": { status: 200, body: { id: 987, status: "Active", detailedStatus: null, operationType: null } },
     });
     const c = new EhPayrollClient(cfg(f));
     const r = await c.upsertByExternalId("17760356", { surname: "Rivera-Chen" });
-    expect(r).toMatchObject({ outcome: "ok", data: { surname: "Rivera-Chen" } });
+    expect(r).toMatchObject({ outcome: "ok", data: { id: 987, created: false, status: "Active" } });
   });
 
-  it("surfaces a 422 as a parsed validation result and does not throw", async () => {
+  it("surfaces a 400 validation body as a parsed validation result and does not throw", async () => {
     const f = fakeFetch({
       "GET /externalid/17760356": { status: 404 },
-      "POST /employee/unstructured": { status: 422, body: { BankAccounts: ["BSB must be 6 digits."] } },
+      "POST /employee/unstructured": {
+        status: 400,
+        body: { message: "BankAccount1: BSB must contain 6 digits only\nBankAccount1: BSB is invalid" },
+      },
     });
     const r = await new EhPayrollClient(cfg(f)).upsertByExternalId("17760356", { bankAccount1_BSB: "12345" });
     expect(r).toEqual({
       outcome: "validation",
-      status: 422,
-      issues: [{ field: "BankAccounts", reason: "BSB must be 6 digits." }],
+      status: 400,
+      issues: [
+        { field: "BankAccount1", reason: "BSB must contain 6 digits only" },
+        { field: "BankAccount1", reason: "BSB is invalid" },
+      ],
     });
   });
 

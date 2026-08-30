@@ -2,34 +2,42 @@ import { describe, it, expect } from "vitest";
 import { parseValidationBody } from "../src/eh/errors.js";
 
 describe("parseValidationBody", () => {
-  it("reads a ModelState-style field dictionary", () => {
-    const body = {
-      TaxFileNumber: ["The tax file number is invalid."],
-      "BankAccounts[0].BSB": ["BSB must be 6 digits."],
-    };
+  it("reads the live shape: { message: 'Field: reason\\nField: reason' }", () => {
+    const body = { message: "BankAccount1: BSB must contain 6 digits only\nBankAccount1: BSB is invalid" };
     expect(parseValidationBody(body)).toEqual([
-      { field: "TaxFileNumber", reason: "The tax file number is invalid." },
-      { field: "BankAccounts[0].BSB", reason: "BSB must be 6 digits." },
+      { field: "BankAccount1", reason: "BSB must contain 6 digits only" },
+      { field: "BankAccount1", reason: "BSB is invalid" },
     ]);
   });
 
-  it("reads an array of messages", () => {
+  it("keeps an unprefixed message line as an (unknown)-field reason", () => {
+    const body = { message: "The sum of the allocated percentage should total 100 for bank accounts" };
+    expect(parseValidationBody(body)).toEqual([
+      { field: "(unknown)", reason: "The sum of the allocated percentage should total 100 for bank accounts" },
+    ]);
+  });
+
+  it("handles a dotted / indexed field name", () => {
+    expect(parseValidationBody({ message: "BankAccounts[0].BSB: must be 6 digits" })).toEqual([
+      { field: "BankAccounts[0].BSB", reason: "must be 6 digits" },
+    ]);
+  });
+
+  it("falls back to a ModelState-style dictionary", () => {
+    expect(parseValidationBody({ TaxFileNumber: ["The tax file number is invalid."] })).toEqual([
+      { field: "TaxFileNumber", reason: "The tax file number is invalid." },
+    ]);
+  });
+
+  it("falls back to an array of messages", () => {
     expect(parseValidationBody(["Start date is required.", "Surname is required."])).toEqual([
       { field: "(unknown)", reason: "Start date is required." },
       { field: "(unknown)", reason: "Surname is required." },
     ]);
   });
 
-  it("reads a { message } envelope", () => {
-    expect(parseValidationBody({ message: "Employee could not be saved." })).toEqual([
-      { field: "(unknown)", reason: "Employee could not be saved." },
-    ]);
-  });
-
-  it("reads a bare string", () => {
-    expect(parseValidationBody("Something was wrong.")).toEqual([
-      { field: "(unknown)", reason: "Something was wrong." },
-    ]);
+  it("reads a bare string with the same line rules", () => {
+    expect(parseValidationBody("Surname: is required")).toEqual([{ field: "Surname", reason: "is required" }]);
   });
 
   it("falls back to a generic reason when the body is empty or unrecognised", () => {

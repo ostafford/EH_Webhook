@@ -21,8 +21,8 @@ The person's record in EH Payroll. Created or updated by the sync. Can exist in 
 EH Payroll's own status for an employee record that was created with less than the data EH needs to be payroll-ready. Minimum fields to create at all: first name, surname, start date, employment type, tax file number.
 
 **Validation failure**:
-The condition that triggers a correction message. Covers: EH rejects the write (HTTP 422), or the resulting employee record is Incomplete, or a field fails EH's format checks (e.g. TFN check digit, BSB). The user's phrase "checksum verifies it's incorrect" refers to this.
-_Avoid_: checksum
+The condition that triggers a correction message. Covers: EH rejects the write (**HTTP 400** with a `{ message: "Field: reason" }` body — e.g. a malformed BSB), or the resulting employee record stays **Incomplete**. Note EH does *not* reject a bad TFN at the API — it stores it and the record stays Incomplete, so a wrong TFN surfaces only through the Incomplete status, not a 400. The user's phrase "checksum verifies it's incorrect" refers to this whole condition.
+_Avoid_: checksum, 422
 
 **Correction message**:
 One of three outbound message types. Sent to the **employee** who entered bad data (data that failed EH validation), as a DM from the Connecteam **custom publisher**. On the third failed Correction cycle it also goes to the employee's Direct manager.
