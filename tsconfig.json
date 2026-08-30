@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "src/health.ts", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
+  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "src/sync", "src/health.ts", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"]
 }
