@@ -46,9 +46,9 @@ export function diffAssignments(
   for (const a of assignments) {
     const was = prior.get(a.id);
     // "Just approved" = now completed, wasn't completed last time we looked.
-    // This also covers un-approve -> re-approve, on the assumption that an
-    // un-approve moves the assignment back to `in_progress` (to confirm against
-    // a live Connecteam account - see docs/field-mapping.md "Still to verify").
+    // This also covers un-approve -> re-approve: an un-approve moves the
+    // assignment back to `in_progress` (verified live 2026-08-31, see
+    // docs/field-mapping.md), so a re-approve is a fresh in_progress -> completed.
     const justApproved = a.status === APPROVED && was?.status !== APPROVED;
 
     if (justApproved) {

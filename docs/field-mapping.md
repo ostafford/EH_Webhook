@@ -78,7 +78,17 @@ Read-back: `GET /api/v2/business/{businessId}/employee/unstructured/externalid/{
 - **A bad TFN is accepted (200)** and the record stays `Incomplete` — never a 400.
 - EH has no `isPostalAddressSameAsResidential`; omitting postal fields is fine.
 
+## Verified against the live Connecteam Onboarding API (issue #7, 2026-08-31)
+
+- Onboarding-pack states map to the assignment API exactly as `CONTEXT.md` says:
+  **Ready for review & approval** = `status: in_progress` + `isWaitingApproval: true`;
+  **Approved** = `status: completed` + `isWaitingApproval: false`.
+- **Un-approve moves the assignment back to `status: in_progress`** (the
+  "Ready for review & approval" bucket) — it does *not* stay `completed`.
+  So a re-approve is a clean `in_progress → completed` transition, which
+  `diffAssignments` (src/cron/sweep.ts) already treats as a fresh approval.
+  Observed live: `in_progress/true → completed/false → in_progress/true`.
+
 ## Still to verify
 
 - Whether `user_updated` fires (and is signed) on custom-field edits — needs a live webhook (issue #3 / #8).
-- Whether an un-approve in Connecteam moves the assignment out of `status: completed` (issue #7).
