@@ -3,10 +3,12 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-worker
 import { defineConfig } from "vitest/config";
 
 /**
- * Two projects:
- *  - "node":   the pure-logic unit tests (fast, `fetch` stubbed, no runtime).
- *  - "worker": end-to-end consumer tests inside workerd, with a real local D1
- *              (migrations applied in test/worker/apply-migrations.ts) and queue.
+ * Three projects:
+ *  - "node":        the pure-logic unit tests (fast, `fetch` stubbed, no runtime).
+ *  - "worker":      end-to-end consumer tests inside workerd, real local D1 + queue.
+ *  - "integration": live checks against the real Connecteam / Employment Hero
+ *                   accounts. NOT run by `npm test` - `npm run test:integration`,
+ *                   and self-skips without CT_API_KEY / EH_API_KEY in .dev.vars.
  */
 export default defineConfig(async () => {
   const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
@@ -18,7 +20,15 @@ export default defineConfig(async () => {
           test: {
             name: "node",
             include: ["test/**/*.test.ts"],
-            exclude: ["test/worker/**"],
+            exclude: ["test/worker/**", "test/**/*.integration.test.ts"],
+            environment: "node",
+            setupFiles: ["./test/setup.env.ts"],
+          },
+        },
+        {
+          test: {
+            name: "integration",
+            include: ["test/**/*.integration.test.ts"],
             environment: "node",
             setupFiles: ["./test/setup.env.ts"],
           },
