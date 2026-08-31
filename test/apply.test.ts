@@ -75,6 +75,8 @@ describe("applyFieldMap - happy path", () => {
     expect(payload.superFund1_ProductCode).toBe("HOS0100AU");
     expect(payload.superFund1_FundName).toBe("Hostplus");
     expect(payload.superFund1_MemberNumber).toBe("M123456");
+    // EH rejects super details with no allocation; v1 is a single fund at 100%.
+    expect(payload.superFund1_AllocatedPercentage).toBe(100);
   });
 
   it("folds in constants and the structural config", () => {
@@ -147,7 +149,8 @@ describe("applyFieldMap - rules engine", () => {
 
   it("marks a non-resident and raises a follow-up", () => {
     const u = clone();
-    setField(u, 42923315, [{ id: 1, value: "No" }]);
+    setField(u, 42923315, [{ id: 1, value: "No" }]); // not an Australian resident
+    setField(u, 42923276, [{ id: 1, value: "No" }]); // ...so, consistently, no tax-free threshold
     const { payload, followUps, issues } = applyFieldMap(u, map);
     expect(issues).toEqual([]);
     expect(payload.australianResident).toBe(false);
@@ -156,12 +159,26 @@ describe("applyFieldMap - rules engine", () => {
     expect(followUps[0]).toMatch(/foreign-resident or working-holiday-maker/);
   });
 
+  it("raises a correction when a non-resident still claims the tax-free threshold", () => {
+    const u = clone();
+    setField(u, 42923315, [{ id: 1, value: "No" }]); // non-resident
+    // 42923276 (claim tax-free threshold) stays "Yes" from the fixture - the conflict
+    const { issues } = applyFieldMap(u, map);
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        ehField: "claimTaxFreeThreshold",
+        reason: expect.stringContaining("non-resident"),
+      }),
+    );
+  });
+
   it("does not sync an SMSF, raises a follow-up instead", () => {
     const u = clone();
     setField(u, 42920803, ""); // clear USI
     const { payload, followUps } = applyFieldMap(u, map);
     expect(payload.superFund1_ProductCode).toBeUndefined();
     expect(payload.superFund1_MemberNumber).toBeUndefined();
+    expect(payload.superFund1_AllocatedPercentage).toBeUndefined();
     expect(followUps).toContain(
       "Self-managed super fund (fund ABN given, no USI) - add the SMSF to the employee in Employment Hero manually.",
     );
