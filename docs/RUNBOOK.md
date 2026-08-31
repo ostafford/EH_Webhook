@@ -39,11 +39,16 @@ then run the wizard.
 
 **Assumptions baked into v1**
 
-- Employees enter **APRA** super (USI + member number). SMSF is surfaced as a
-  Manual-follow-up notice, not synced.
-- Awards / pay rates are already set up in Employment Hero — the sync never sets them.
+- Employees enter **APRA** super (USI + member number); the sync writes a single
+  fund at 100% allocation. SMSF is surfaced as a Manual-follow-up notice, not synced.
+- Awards / pay rates / **pay-run defaults** are set up in Employment Hero by a
+  payroll admin — the sync never sets them. Until an admin does, EH reports the
+  new record as **`Incomplete`** and the sync raises a **Manual-follow-up
+  notice** to the alerts channel (it is *not* sent to the employee as a
+  Correction). See [Verify & go live](#7-verify--go-live).
 - Onboarding-pack approval is a real step (the initial Sync fires when a pack
-  first reaches `status: completed`).
+  first reaches `status: completed`). **Re-approving** a pack is *not* a reliable
+  way to force a resync — see [Operations](#re-syncing-an-employee).
 
 **Local tools** (on the machine doing the deploy)
 
@@ -207,16 +212,42 @@ changes accordingly.
 
 ## 6. Register the Connecteam webhook
 
-Needs the deployed URL, so it comes after deploy. Register a webhook for the
-**`users`** feature pointing at `https://<worker>.workers.dev/webhook`, with the
-**`CT_WEBHOOK_SECRET`** from step 2e — via the Connecteam UI or
-`POST /settings/v1/webhooks`.
+Needs the deployed URL, so it comes after deploy. The wizard does this in its
+last stage; the manual equivalent is below.
 
-> **First real delivery — confirm the signature scheme.**
-> `src/connecteam/signature.ts` `DEFAULT_SCHEME` assumes a lowercase-hex
-> HMAC-SHA256 of the raw body in the `x-connecteam-signature` header. If the first
-> real delivery is rejected (`401`), capture that delivery's headers + body and
-> adjust `DEFAULT_SCHEME` — the verify logic and the route don't change.
+**It must be done via the API, not the Connecteam UI.** The webhook's signing
+secret (`secretKey`) can only be set through `POST /settings/v1/webhooks` — the
+UI has no field for it — and the Worker rejects every delivery that arrives
+without a matching secret with `401`. A UI-created webhook will therefore never
+work.
+
+```bash
+set -a; source .dev.vars; set +a          # CT_API_KEY, CT_WEBHOOK_SECRET
+curl -sS -X POST "https://api.connecteam.com/settings/v1/webhooks" \
+  -H "X-API-KEY: $CT_API_KEY" -H "content-type: application/json" \
+  -d '{
+        "name": "EH Payroll Sync (profile updates)",
+        "url": "https://<worker>.workers.dev/webhook",
+        "featureType": "users",
+        "eventTypes": ["user_updated"],
+        "secretKey": "'"$CT_WEBHOOK_SECRET"'"
+      }'
+```
+
+A `200` with `data.id` means it is registered. List them any time with
+`GET /settings/v1/webhooks`.
+
+> **Signature scheme (confirmed against a real delivery, #22).**
+> Connecteam webhook `webhookVersion: 1` does **not** sign the body. It sends the
+> registered `secretKey` verbatim in the **`x-webhook-secret`** header.
+> `src/connecteam/signature.ts` `DEFAULT_SCHEME` reflects this
+> (`mode: "shared_secret"`). An `hmac` mode is kept in that file for a future
+> signed version; switching needs only a new `DEFAULT_SCHEME`, not route changes.
+
+> **Delivery volume.** Connecteam fires one `user_updated` delivery **per changed
+> field**, so a single profile edit arrives as a burst (you'll see several
+> `202`s in the logs). The queue consumer coalesces a burst for one user into a
+> single Sync — no duplicate messages or record writes.
 
 ---
 
@@ -225,9 +256,19 @@ Needs the deployed URL, so it comes after deploy. Register a webhook for the
 | Path | Test | Expected |
 |---|---|---|
 | Approval | Approve a test employee's Onboarding pack | They appear in Employment Hero within ~1 min (the sweep runs every minute) |
-| Edit | Change that employee's Connecteam profile | Their EH record updates |
+| Edit | Change that employee's Connecteam profile | Their EH record updates (via the `user_updated` webhook — step 6) |
 | Correction | Enter a deliberately bad BSB | The employee gets a **Correction message** from the custom publisher |
 | Follow-up | Set a test employee to non-resident | A **Manual-follow-up notice** appears in the **alerts channel**; the Sync still completes |
+| Incomplete | Sync an employee who has **no award / pay-run defaults** in EH | The record is created but EH marks it `Incomplete`; a **Manual-follow-up notice** ("a payroll admin needs to finish setup … pay-run defaults / award / pay rate") goes to the alerts channel — **not** to the employee. A payroll admin sets the award in EH; the record then reads `Complete`. |
+
+`INTERNATIONAL` address and SMSF super (fund ABN, no USI) also produce a
+Manual-follow-up notice. When several apply at once (e.g. a non-resident whose
+record is also `Incomplete` for pay-run defaults) they are listed together in a
+single notice.
+
+> A non-resident for tax who *also* answered "yes" to the tax-free threshold is a
+> contradiction EH rejects — the sync catches it first and sends the employee a
+> Correction ("set that answer to No"), not a follow-up.
 
 **Go live:** existing approved employees flow in over the next few minutes via the
 sweep, throttled (~20/minute). Watch `/health` and the alerts channel.
@@ -286,15 +327,27 @@ Worker — one JSON line per event, every line passed through `src/redact.ts` fi
 
 | Message | Recipient | Action |
 |---|---|---|
-| **Correction message** | the employee (DM); + Direct manager on the 3rd failed attempt in a row | the employee fixes the named field(s) in Connecteam; their next edit re-syncs automatically |
-| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address |
+| **Correction message** | the employee (DM); + Direct manager on the 3rd failed attempt in a row | the employee fixes the named field(s) in Connecteam; **their next profile edit re-syncs** (see below) |
+| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** |
 | **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job |
+
+### Re-syncing an employee
+A resync is triggered by a **profile edit** in Connecteam (the `user_updated`
+webhook, step 6) or by an onboarding pack reaching `completed` for the **first**
+time (the sweep). It is **not** reliably triggered by un-approving and
+re-approving a pack — the assignment does not dependably leave `status:
+completed`, and the sweep only enqueues on the transition *into* `completed`. So
+when a Correction message says "we'll sync again automatically", that depends on
+the employee **editing their profile** — which is why step 6's webhook is
+mandatory, not optional. To force a resync for an employee whose profile hasn't
+changed, edit any field on their Connecteam profile (an identical re-save is
+deduplicated and does nothing).
 
 ### Replaying a dead-lettered job
 A message on `eh-webhook-dlq` has already raised a System alert. After fixing the
-cause, re-drive it with `wrangler queues`, or just re-trigger the source edit in
-Connecteam (approve/re-approve the pack, or edit the profile). Nothing
-auto-retries a dead-lettered job.
+cause, re-drive it with `wrangler queues`, or re-trigger the source edit in
+Connecteam (edit the profile; first-time pack approval). Nothing auto-retries a
+dead-lettered job.
 
 ### Rotating keys
 `npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` with the
