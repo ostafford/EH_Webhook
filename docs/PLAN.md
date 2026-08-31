@@ -175,6 +175,10 @@ _Rough total: ~3 working weeks for one engineer._
 
 ## 5. Client runbook outline (`docs/RUNBOOK.md`)
 
+> Fully written in [`RUNBOOK.md`](./RUNBOOK.md) for the **self-host** model
+> (client runs it on their own Cloudflare account; `scripts/setup-wizard.sh` is
+> the happy path). The outline below is the historical skeleton.
+
 1. **Prerequisites checklist** (from Q40 + A40): EH Payroll AU + API access;
    single employing entity; Connecteam Onboarding feature with approval; APRA super;
    awards already configured in EH.
