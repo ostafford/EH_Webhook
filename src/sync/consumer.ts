@@ -177,18 +177,28 @@ export async function dispatchBatch(
         message.ack();
       }
     }
+    await bump(deps, "dl_total", batch.messages.length);
     return;
   }
 
+  let acked = 0;
   for (const message of batch.messages) {
     try {
       const outcome = await runSyncJob(message.body, deps);
       if (outcome.status === "retry") message.retry();
-      else message.ack();
+      else {
+        message.ack();
+        acked++;
+      }
     } catch {
       message.retry();
     }
   }
+  await bump(deps, "acked_total", acked);
+}
+
+async function bump(deps: SyncDeps, key: string, delta: number): Promise<void> {
+  if (delta > 0) await deps.store.bumpCounter(key, delta);
 }
 
 /** DLQ handler: a job that exhausted its retries. Raise a System alert. */

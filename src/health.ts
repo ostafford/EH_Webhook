@@ -2,7 +2,12 @@ import { loadFieldMap } from "./mapping/loader.js";
 
 /** The bits of the Worker env that /health inspects. The real Env satisfies this. */
 export interface HealthEnv {
-  DB: { prepare(query: string): { first(): Promise<unknown> } };
+  DB: {
+    prepare(query: string): {
+      first(): Promise<unknown>;
+      all(): Promise<{ results: unknown[] }>;
+    };
+  };
   FIELD_MAP_CLIENT: string;
   EH_BUSINESS_ID: string;
   EH_PAY_SCHEDULE_ID: string;
@@ -20,6 +25,15 @@ export interface Health {
     fieldMapClient: string;
     businessConfigured: boolean;
   };
+  /** Operational counters, or null if the meta table is unreadable. */
+  ops: {
+    /** Sync messages sent but not yet acked or dead-lettered. */
+    queueBacklog: number;
+    /** Jobs that exhausted their retries and dead-lettered. */
+    deadLettered: number;
+    /** ISO time the approval sweep last completed without error, or null. */
+    lastSweepOkAt: string | null;
+  } | null;
 }
 
 export async function buildHealth(env: HealthEnv): Promise<Health> {
@@ -50,5 +64,24 @@ export async function buildHealth(env: HealthEnv): Promise<Health> {
         env.EH_BUSINESS_ID && env.EH_PAY_SCHEDULE_ID && env.EH_LOCATION_ID,
       ),
     },
+    ops: await readOps(env),
   };
+}
+
+async function readOps(env: HealthEnv): Promise<Health["ops"]> {
+  try {
+    const { results } = await env.DB.prepare("SELECT key, num FROM sync_meta").all();
+    const m = new Map((results as Array<{ key: string; num: number }>).map((r) => [r.key, r.num]));
+    const enqueued = m.get("enqueued_total") ?? 0;
+    const acked = m.get("acked_total") ?? 0;
+    const deadLettered = m.get("dl_total") ?? 0;
+    const sweepAt = m.get("last_sweep_ok_at") ?? 0;
+    return {
+      queueBacklog: Math.max(0, enqueued - acked - deadLettered),
+      deadLettered,
+      lastSweepOkAt: sweepAt > 0 ? new Date(sweepAt).toISOString() : null,
+    };
+  } catch {
+    return null;
+  }
 }

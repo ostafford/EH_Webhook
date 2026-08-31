@@ -9,6 +9,7 @@ import { dispatchBatch, type SyncDeps } from "./sync/consumer.js";
 import { runSweep } from "./cron/sweep.js";
 import { handleWebhook } from "./webhook/inbound.js";
 import { DEFAULT_SCHEME } from "./connecteam/signature.js";
+import { logEvent } from "./log.js";
 
 /** Dead-letter queue name (see `dead_letter_queue` in wrangler.jsonc). */
 const DLQ_NAME = "eh-webhook-dlq";
@@ -36,10 +37,13 @@ app.post("/webhook", async (c) => {
   if (outcome.job) {
     try {
       await c.env.SYNC_QUEUE.send(outcome.job);
+      await new SyncStore(c.env.DB).bumpCounter("enqueued_total", 1);
     } catch {
+      logEvent({ evt: "webhook", status: 503, ctUserId: outcome.job.ctUserId, reason: "enqueue failed" });
       return c.json({ error: "could not enqueue" }, 503);
     }
   }
+  logEvent({ evt: "webhook", status: outcome.status, ctUserId: outcome.job?.ctUserId ?? null });
   return c.json(outcome.body, outcome.status as 200 | 202 | 400 | 401 | 500);
 });
 
@@ -68,6 +72,7 @@ export default {
    */
   async queue(batch, env): Promise<void> {
     await dispatchBatch(batch, buildDeps(env), DLQ_NAME);
+    logEvent({ evt: "queue", queue: batch.queue, messages: batch.messages.length });
   },
 
   /** 1-minute cron: sweep the Connecteam onboarding API and enqueue new approvals. */
@@ -78,7 +83,7 @@ export default {
     });
     const store = new SyncStore(env.DB);
 
-    await runSweep({
+    const result = await runSweep({
       packId: Number(env.CT_ONBOARDING_PACK_ID),
       listAssignments: (packId) => ct.listAssignments(packId),
       rateLimit: () => ct.lastRateLimit,
@@ -86,7 +91,13 @@ export default {
       writeState: (assignments, seenAt) => store.writeOnboardingState(assignments, seenAt),
       enqueue: async (jobs) => {
         await env.SYNC_QUEUE.sendBatch(jobs.map((body) => ({ body })));
+        await store.bumpCounter("enqueued_total", jobs.length);
       },
     });
+
+    if (result.status !== "retry") {
+      await store.setMarker("last_sweep_ok_at", Date.now());
+    }
+    logEvent({ evt: "sweep", ...result });
   },
 } satisfies ExportedHandler<Env, SyncJob>;
