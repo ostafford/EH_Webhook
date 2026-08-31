@@ -6,8 +6,22 @@ import {
   systemAlertMessage,
   friendlyLine,
   GENERIC_CORRECTION,
+  personLabel,
 } from "../src/sync/messages.js";
 import type { EhFieldError } from "../src/eh/errors.js";
+
+describe("personLabel", () => {
+  it("is 'First Last (id)' when a name is known", () => {
+    expect(personLabel({ ctUserId: 42, firstName: "Jane", lastName: "Smith" })).toBe("Jane Smith (42)");
+  });
+  it("uses whichever name parts are present", () => {
+    expect(personLabel({ ctUserId: 42, firstName: "Jane" })).toBe("Jane (42)");
+  });
+  it("falls back to 'Connecteam user id' with no name", () => {
+    expect(personLabel({ ctUserId: 42 })).toBe("Connecteam user 42");
+    expect(personLabel({ ctUserId: 42, firstName: "  ", lastName: null })).toBe("Connecteam user 42");
+  });
+});
 
 describe("friendlyLine - curated EH-error -> plain language", () => {
   const cases: Array<[EhFieldError, RegExp]> = [
@@ -21,6 +35,8 @@ describe("friendlyLine - curated EH-error -> plain language", () => {
     [{ field: "employmentType", reason: "is not valid" }, /employment type/],
     [{ field: "residentialPostCode", reason: "is invalid" }, /postcode/],
     [{ field: "superFund1_MemberNumber", reason: "is required" }, /super fund/],
+    [{ field: "(unknown)", reason: "Tax free threshold can only be claimed for Australian residents" }, /tax declaration/],
+    [{ field: "claimTaxFreeThreshold", reason: "a non-resident for tax cannot claim the tax-free threshold - set that answer to No" }, /tax declaration/],
   ];
   it.each(cases)("%o -> %s", (err, re) => {
     expect(friendlyLine(err)).toMatch(re);
@@ -103,6 +119,11 @@ describe("followUpNoticeMessage", () => {
   it("still says something useful when given no reasons", () => {
     const msg = followUpNoticeMessage([], { ctUserId: 42 });
     expect(msg).toContain("review this record");
+  });
+
+  it("leads with the employee's name and keeps the id in brackets when a name is known", () => {
+    const msg = followUpNoticeMessage(["x"], { ctUserId: 17760356, firstName: "Jane", lastName: "Smith" });
+    expect(msg).toContain("Payroll follow-up needed for Jane Smith (17760356):");
   });
 });
 

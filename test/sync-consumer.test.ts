@@ -208,7 +208,7 @@ describe("runSyncJob - ordering and idempotency", () => {
     const out = await runSyncJob(job({ eventTimestamp: 2000, reason: "profile_update" }), { ...d, ct: fakeCt(cloneUser()) as never });
 
     // Second run: payload unchanged -> no second write, still a no-op skip.
-    expect(out).toMatchObject({ status: "skipped", reason: "unchanged since last sync" });
+    expect(out).toMatchObject({ status: "skipped", reason: "identical to the last processed state" });
     expect(eh.upserts).toHaveLength(1);
     expect(store.rows.get(17760356)!.lastSyncedTs).toBe(1000);
   });
@@ -251,8 +251,9 @@ describe("runSyncJob - correction path", () => {
     expect(ct.dms[0]!.userId).toBe(17760356);
     expect(ct.dms[0]!.text).toMatch(/BSB/);
     expect(store.log.at(-1)).toMatchObject({ outcome: "correction" });
-    // Failed sync: last payload hash stays null so the next event re-tries.
-    expect(store.rows.get(17760356)!.lastPayloadHash).toBeNull();
+    // The attempt's hash is stored (clean or not) so a byte-identical
+    // re-delivery is skipped; a real edit changes the payload and re-tries.
+    expect(store.rows.get(17760356)!.lastPayloadHash).toEqual(expect.any(String));
     expect(store.rows.get(17760356)!.lastSyncedTs).toBe(1000);
   });
 
@@ -306,7 +307,8 @@ describe("runSyncJob - correction path", () => {
 describe("runSyncJob - follow-up path", () => {
   it("a non-resident result posts to the admin channel and still completes the sync", async () => {
     const user = cloneUser();
-    user.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
+    user.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }]; // non-resident
+    user.customFields.find((f) => f.customFieldId === 42923276)!.value = [{ id: 1, value: "No" }]; // consistent: no TFT
     const ct = fakeCt(user);
     const store = fakeGateway();
 
@@ -398,6 +400,43 @@ describe("dispatchBatch", () => {
 
     expect(good.calls).toEqual(["ack"]);
     expect(bad.calls).toEqual(["retry"]);
+  });
+
+  it("coalesces a burst for one user - runs only the newest, acks the rest", async () => {
+    const store = fakeGateway();
+    const eh = fakeEh({ id: 555, created: true });
+    const older1 = mkMsg(job({ ctUserId: 17760356, eventTimestamp: 1000 }));
+    const older2 = mkMsg(job({ ctUserId: 17760356, eventTimestamp: 1500 }));
+    const newest = mkMsg(job({ ctUserId: 17760356, eventTimestamp: 2000 }));
+
+    await dispatchBatch(
+      { queue: "eh-webhook-sync", messages: [older1, newest, older2] },
+      deps({ store, eh }),
+      "eh-webhook-dlq",
+    );
+
+    expect(eh.upserts).toHaveLength(1);
+    expect(store.log).toHaveLength(1);
+    expect(store.rows.get(17760356)!.lastSyncedTs).toBe(2000);
+    expect(older1.calls).toEqual(["ack"]);
+    expect(older2.calls).toEqual(["ack"]);
+    expect(newest.calls).toEqual(["ack"]);
+  });
+
+  it("does not coalesce across different users", async () => {
+    const store = fakeGateway();
+    const a = mkMsg(job({ ctUserId: 1, eventTimestamp: 1000 }));
+    const b = mkMsg(job({ ctUserId: 2, eventTimestamp: 1000 }));
+
+    await dispatchBatch(
+      { queue: "eh-webhook-sync", messages: [a, b] },
+      deps({ store, ct: fakeCt(cloneUser()) as never }),
+      "eh-webhook-dlq",
+    );
+
+    expect(a.calls).toEqual(["ack"]);
+    expect(b.calls).toEqual(["ack"]);
+    expect(store.log).toHaveLength(2);
   });
 
   it("routes a dead-letter batch to the system-alert handler and always acks", async () => {
