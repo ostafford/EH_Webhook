@@ -5,11 +5,13 @@
   "type": "module",
   "description": "Sync employee details from Connecteam into Employment Hero Payroll",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --project node --project worker",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "deploy": "wrangler deploy",
-    "discover": "tsx scripts/discover.ts"
+    "discover": "tsx scripts/discover.ts",
+    "test:integration": "vitest run --project integration",
+    "test:all": "vitest run"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

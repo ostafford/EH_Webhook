@@ -8,6 +8,12 @@ Glossary terms (**custom publisher**, **alerts channel**, **Correction message**
 **Manual-follow-up notice**, **System alert**, **Onboarding pack**) are defined in
 [`../CONTEXT.md`](../CONTEXT.md). Companion: [`PLAN.md`](./PLAN.md) §5.
 
+> **Scripts.** `scripts/setup-wizard.sh` walks the whole of §1–§8 interactively —
+> it opens each page, captures the values, provisions D1 + Queues, pushes the
+> secrets and deploys. The steps below are the reference it follows. After
+> go-live, `scripts/update.sh` pulls, re-tests, migrates and redeploys.
+> _(A full rewrite of this runbook for the self-host model is tracked in #21.)_
+
 ---
 
 ## 0. Prerequisites (confirm with the client before starting)
