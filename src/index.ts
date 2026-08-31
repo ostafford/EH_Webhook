@@ -10,6 +10,7 @@ import { runSweep } from "./cron/sweep.js";
 import { handleWebhook } from "./webhook/inbound.js";
 import { DEFAULT_SCHEME } from "./connecteam/signature.js";
 import { logEvent } from "./log.js";
+import { postIntegrator, SYSTEM_ALERT_DEDUPE_MS, HEALTH_PUSH_INTERVAL_MS } from "./integrator.js";
 
 /** Dead-letter queue name (see `dead_letter_queue` in wrangler.jsonc). */
 const DLQ_NAME = "eh-webhook-dlq";
@@ -50,16 +51,44 @@ app.post("/webhook", async (c) => {
 app.notFound((c) => c.json({ error: "not found" }, 404));
 
 function buildDeps(env: Env): SyncDeps {
+  const store = new SyncStore(env.DB);
   return {
     ct: new ConnecteamClient({
       apiKey: env.CT_API_KEY,
       customPublisherId: Number(env.CT_CUSTOM_PUBLISHER_ID),
     }),
     eh: new EhPayrollClient({ apiKey: env.EH_API_KEY, businessId: env.EH_BUSINESS_ID }),
-    store: new SyncStore(env.DB),
+    store,
     fieldMap: loadFieldMap(env.FIELD_MAP_CLIENT),
     adminChannelId: env.ADMIN_CONNECTEAM_CHANNEL_ID,
+    ...(env.INTEGRATOR_ALERT_URL
+      ? {
+          onSystemAlert: async ({ ctUserId, reason }: { ctUserId: number; reason: string }) => {
+            // Dedupe per user within the window so a flapping client can't flood.
+            const key = `integ_alert_${ctUserId}`;
+            const last = (await store.readMeta([key]))[key] ?? 0;
+            if (Date.now() - last < SYSTEM_ALERT_DEDUPE_MS) return;
+            await store.setMarker(key, Date.now());
+            await postIntegrator(env, {
+              kind: "system_alert",
+              ctUserId,
+              reason,
+              at: new Date().toISOString(),
+            });
+          },
+        }
+      : {}),
   };
+}
+
+/** Once a day, POST a redaction-safe /health summary to the integrator. */
+async function maybePushHealth(env: Env, store: SyncStore): Promise<void> {
+  if (!env.INTEGRATOR_ALERT_URL) return;
+  const last = (await store.readMeta(["integ_health_at"])).integ_health_at ?? 0;
+  if (Date.now() - last < HEALTH_PUSH_INTERVAL_MS) return;
+  await store.setMarker("integ_health_at", Date.now());
+  const h = await buildHealth(env);
+  await postIntegrator(env, { kind: "health", ok: h.ok, d1: h.d1, fieldMap: h.fieldMap, ops: h.ops, at: h.time });
 }
 
 export default {
@@ -99,5 +128,7 @@ export default {
       await store.setMarker("last_sweep_ok_at", Date.now());
     }
     logEvent({ evt: "sweep", ...result });
+
+    await maybePushHealth(env, store);
   },
 } satisfies ExportedHandler<Env, SyncJob>;

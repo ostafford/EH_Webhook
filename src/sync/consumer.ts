@@ -35,6 +35,8 @@ export interface SyncDeps {
   adminChannelId: string;
   /** Overridable clock for the audit timestamp. */
   now?: () => number;
+  /** Optional: also notify the integrator when a job dead-letters. Best-effort. */
+  onSystemAlert?: (info: { ctUserId: number; reason: string }) => Promise<void>;
 }
 
 export type SyncJobStatus = "synced" | "correction" | "follow_up" | "skipped" | "retry";
@@ -204,7 +206,7 @@ async function bump(deps: SyncDeps, key: string, delta: number): Promise<void> {
 /** DLQ handler: a job that exhausted its retries. Raise a System alert. */
 export async function handleDeadLetter(
   job: SyncJob,
-  deps: Pick<SyncDeps, "ct" | "store" | "adminChannelId" | "now">,
+  deps: Pick<SyncDeps, "ct" | "store" | "adminChannelId" | "now" | "onSystemAlert">,
 ): Promise<void> {
   const now = deps.now ?? Date.now;
   const detail = `the sync exceeded its retry limit (trigger "${job.reason}")`;
@@ -218,6 +220,9 @@ export async function handleDeadLetter(
     outcome: "dead_letter",
     detail: "retries exhausted",
   });
+  if (deps.onSystemAlert) {
+    await deps.onSystemAlert({ ctUserId: job.ctUserId, reason: `retries exhausted (${job.reason})` });
+  }
 }
 
 function outcomeLabel(decision: SyncDecision): SyncOutcomeLabel {

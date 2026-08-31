@@ -1,11 +1,11 @@
 /**
- * Resolves the field-map for the client this deployment serves, chosen by the
- * `FIELD_MAP_CLIENT` var, and validates it. A missing or invalid map throws -
- * the first request (and `/health`) surfaces it rather than the Worker running
- * with a broken config.
+ * Resolves this deployment's field-map and validates it. One repo clone serves
+ * one client (`clients/self/`); `FIELD_MAP_CLIENT` only needs setting for a
+ * multi-tenant deployment. A missing or invalid map throws - the first request
+ * (and `/health`) surfaces it rather than the Worker running with a broken config.
  */
 import { parseFieldMap, type FieldMap } from "./schema.js";
-import { FIELD_MAPS } from "./registry.js";
+import { FIELD_MAPS, DEFAULT_CLIENT } from "./registry.js";
 
 export class FieldMapError extends Error {
   constructor(message: string) {
@@ -16,14 +16,19 @@ export class FieldMapError extends Error {
 
 let cache: { client: string; map: FieldMap } | null = null;
 
-export function loadFieldMap(client: string): FieldMap {
-  if (cache?.client === client) return cache.map;
+/**
+ * Resolve the field-map for this deployment. With no argument (or a blank
+ * `FIELD_MAP_CLIENT`) it loads `clients/self/` - the single-client default.
+ */
+export function loadFieldMap(client?: string | null): FieldMap {
+  const key = client && client.trim() !== "" ? client.trim() : DEFAULT_CLIENT;
+  if (cache?.client === key) return cache.map;
 
-  const raw = FIELD_MAPS[client];
+  const raw = FIELD_MAPS[key];
   if (raw === undefined) {
     throw new FieldMapError(
-      `No field-map bundled for FIELD_MAP_CLIENT="${client}". ` +
-        `Add clients/${client}/field-map.json and register it in src/mapping/registry.ts. ` +
+      `No field-map bundled for FIELD_MAP_CLIENT="${key}". ` +
+        `Add clients/${key}/field-map.json and register it in src/mapping/registry.ts. ` +
         `Bundled clients: ${Object.keys(FIELD_MAPS).join(", ") || "(none)"}.`,
     );
   }
@@ -33,11 +38,11 @@ export function loadFieldMap(client: string): FieldMap {
     map = parseFieldMap(raw);
   } catch (err) {
     throw new FieldMapError(
-      `Field-map for "${client}" is invalid. ${err instanceof Error ? err.message : String(err)}`,
+      `Field-map for "${key}" is invalid. ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
-  cache = { client, map };
+  cache = { client: key, map };
   return map;
 }
 
