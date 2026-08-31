@@ -15,6 +15,16 @@ describe("loadFieldMap", () => {
     expect(loadFieldMap("_example")).toBe(loadFieldMap("_example"));
   });
 
+  it("defaults to clients/self when given no client (or a blank one)", () => {
+    expect(loadFieldMap().client).toBe("self");
+    resetFieldMapCache();
+    expect(loadFieldMap("").client).toBe("self");
+    resetFieldMapCache();
+    expect(loadFieldMap("   ").client).toBe("self");
+    resetFieldMapCache();
+    expect(loadFieldMap(undefined).client).toBe("self");
+  });
+
   it("throws a helpful FieldMapError for an unregistered client", () => {
     try {
       loadFieldMap("acme");

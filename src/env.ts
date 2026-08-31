@@ -13,11 +13,20 @@ export interface Env {
   CT_WEBHOOK_SECRET: string;
 
   // vars
-  FIELD_MAP_CLIENT: string;
+  /** Only for a multi-tenant deployment; blank/unset loads clients/self/. */
+  FIELD_MAP_CLIENT?: string;
   EH_BUSINESS_ID: string;
   EH_PAY_SCHEDULE_ID: string;
   EH_LOCATION_ID: string;
   CT_ONBOARDING_PACK_ID: string;
   CT_CUSTOM_PUBLISHER_ID: string;
   ADMIN_CONNECTEAM_CHANNEL_ID: string;
+
+  /**
+   * Optional integrator telemetry. If set, the Worker also POSTs each System
+   * alert (deduped) and a once-a-day /health summary to this URL, with
+   * `x-eh-sync-secret: <INTEGRATOR_ALERT_SECRET>`. Unset = off.
+   */
+  INTEGRATOR_ALERT_URL?: string;
+  INTEGRATOR_ALERT_SECRET?: string;
 }

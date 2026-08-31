@@ -15,6 +15,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "src/sync", "src/cron", "src/webhook", "src/health.ts", "src/redact.ts", "src/log.ts", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"],
+  "include": ["src/mapping", "src/http", "src/eh", "src/connecteam", "src/sync", "src/cron", "src/webhook", "src/health.ts", "src/redact.ts", "src/log.ts", "src/integrator.ts", "scripts", "test", "vitest.config.ts", "drizzle.config.ts"],
   "exclude": ["test/worker"]
 }

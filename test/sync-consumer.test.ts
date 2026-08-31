@@ -429,4 +429,28 @@ describe("handleDeadLetter", () => {
     expect(ct.channels[0]!.text).toContain("42");
     expect(store.log[0]).toMatchObject({ ctUserId: 42, at: 5, outcome: "dead_letter" });
   });
+
+  it("also notifies the integrator when onSystemAlert is provided", async () => {
+    const ct = fakeCt(cloneUser());
+    const store = fakeGateway();
+    const alerts: Array<{ ctUserId: number; reason: string }> = [];
+    await handleDeadLetter(job({ ctUserId: 7, reason: "profile_update" }), {
+      ct: ct as never,
+      store,
+      adminChannelId: "chan-1",
+      now: () => 5,
+      onSystemAlert: async (info) => {
+        alerts.push(info);
+      },
+    });
+    expect(alerts).toEqual([{ ctUserId: 7, reason: "retries exhausted (profile_update)" }]);
+  });
+
+  it("works without onSystemAlert (integrator telemetry off)", async () => {
+    const ct = fakeCt(cloneUser());
+    const store = fakeGateway();
+    await expect(
+      handleDeadLetter(job({ ctUserId: 8 }), { ct: ct as never, store, adminChannelId: "c", now: () => 1 }),
+    ).resolves.toBeUndefined();
+  });
 });

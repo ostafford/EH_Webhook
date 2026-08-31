@@ -9,13 +9,18 @@
   // Non-secret, per-deployment. Fill these from the client's accounts (see docs/RUNBOOK.md).
   // Secrets are set with `wrangler secret put`: CT_API_KEY, EH_API_KEY, CT_WEBHOOK_SECRET.
   "vars": {
-    "FIELD_MAP_CLIENT": "_example",
+    // Leave blank: the Worker loads clients/self/field-map.json. Set only for a
+    // multi-tenant deployment (see src/mapping/registry.ts).
+    "FIELD_MAP_CLIENT": "",
     "EH_BUSINESS_ID": "",
     "EH_PAY_SCHEDULE_ID": "",
     "EH_LOCATION_ID": "",
     "CT_ONBOARDING_PACK_ID": "",
     "CT_CUSTOM_PUBLISHER_ID": "",
-    "ADMIN_CONNECTEAM_CHANNEL_ID": ""
+    "ADMIN_CONNECTEAM_CHANNEL_ID": "",
+    // Optional integrator telemetry. Blank = off. INTEGRATOR_ALERT_SECRET is a
+    // secret (`wrangler secret put`), not a var.
+    "INTEGRATOR_ALERT_URL": ""
   },
 
   "d1_databases": [

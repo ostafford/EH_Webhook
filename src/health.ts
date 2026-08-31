@@ -8,7 +8,7 @@ export interface HealthEnv {
       all(): Promise<{ results: unknown[] }>;
     };
   };
-  FIELD_MAP_CLIENT: string;
+  FIELD_MAP_CLIENT?: string;
   EH_BUSINESS_ID: string;
   EH_PAY_SCHEDULE_ID: string;
   EH_LOCATION_ID: string;
@@ -59,7 +59,7 @@ export async function buildHealth(env: HealthEnv): Promise<Health> {
     d1,
     fieldMap,
     config: {
-      fieldMapClient: env.FIELD_MAP_CLIENT,
+      fieldMapClient: env.FIELD_MAP_CLIENT?.trim() || "self",
       businessConfigured: Boolean(
         env.EH_BUSINESS_ID && env.EH_PAY_SCHEDULE_ID && env.EH_LOCATION_ID,
       ),
