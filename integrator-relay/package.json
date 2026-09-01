@@ -1,0 +1,20 @@
+{
+  "name": "eh-webhook-integrator-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone receiver for EH_Webhook client telemetry (issue #23) — turns system_alert / health pushes into GitHub issues the integrator gets notified about.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260830.1",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
+  }
+}

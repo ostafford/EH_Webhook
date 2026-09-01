@@ -85,6 +85,7 @@ function buildDeps(env: Env): SyncDeps {
             await store.setMarker(key, Date.now());
             await postIntegrator(env, {
               kind: "system_alert",
+              client: env.INTEGRATOR_CLIENT_ID ?? "",
               ctUserId,
               reason,
               at: new Date().toISOString(),
@@ -102,7 +103,15 @@ async function maybePushHealth(env: Env, store: SyncStore): Promise<void> {
   if (Date.now() - last < HEALTH_PUSH_INTERVAL_MS) return;
   await store.setMarker("integ_health_at", Date.now());
   const h = await buildHealth(env);
-  await postIntegrator(env, { kind: "health", ok: h.ok, d1: h.d1, fieldMap: h.fieldMap, ops: h.ops, at: h.time });
+  await postIntegrator(env, {
+    kind: "health",
+    client: env.INTEGRATOR_CLIENT_ID ?? "",
+    ok: h.ok,
+    d1: h.d1,
+    fieldMap: h.fieldMap,
+    ops: h.ops,
+    at: h.time,
+  });
 }
 
 export default {

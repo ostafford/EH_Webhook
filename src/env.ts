@@ -25,8 +25,11 @@ export interface Env {
   /**
    * Optional integrator telemetry. If set, the Worker also POSTs each System
    * alert (deduped) and a once-a-day /health summary to this URL, with
-   * `x-eh-sync-secret: <INTEGRATOR_ALERT_SECRET>`. Unset = off.
+   * `x-eh-sync-secret: <INTEGRATOR_ALERT_SECRET>`. Unset = off. The receiver is
+   * the standalone relay in `integrator-relay/` (issue #23).
    */
   INTEGRATOR_ALERT_URL?: string;
   INTEGRATOR_ALERT_SECRET?: string;
+  /** Short slug identifying this client on the shared relay (e.g. "acme"). */
+  INTEGRATOR_CLIENT_ID?: string;
 }
