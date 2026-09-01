@@ -114,6 +114,23 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
   return { payload, issues };
 }
 
+/**
+ * Fold the opt-in `employmentHero.defaults` block (issue #26) into the payload.
+ * The schema key names already match the EH unstructured-employee field names
+ * (`awardId`, `primaryPayCategory`, `rate`, `rateUnit`, `hoursPerWeek`,
+ * `hoursPerDay`) verified in `docs/eh-pay-defaults.md`, so this is a verbatim
+ * copy - EH validates the pay-run set all-or-nothing.
+ */
+function applyPayDefaults(
+  payload: Record<string, PayloadValue>,
+  defaults: FieldMap["employmentHero"]["defaults"],
+): void {
+  if (!defaults) return;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (value !== undefined) payload[key] = value as PayloadValue;
+  }
+}
+
 function mergeRuleOutput(
   target: { payload: Record<string, PayloadValue>; issues: MappingIssue[]; followUps: string[] },
   r: RuleOutput,
@@ -140,6 +157,7 @@ export function applyFieldMap(user: ConnecteamUser, map: FieldMap): MappingResul
   // Structural values from the client config.
   acc.payload.payScheduleId = map.employmentHero.payScheduleId;
   acc.payload.locationId = map.employmentHero.locationId;
+  applyPayDefaults(acc.payload, map.employmentHero.defaults);
 
   const externalId = String(user.userId);
   acc.payload.externalId = externalId;

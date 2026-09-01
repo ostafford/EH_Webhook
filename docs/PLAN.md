@@ -18,7 +18,7 @@ comes back to the employee as a Connecteam chat message.
 | Personal, address, emergency contact, structural fields | Offboarding / termination / archival |
 | TFN + tax-declaration answers | Pay **rate** amounts (no field yet) |
 | One bank account | 2nd/3rd bank accounts |
-| APRA super (USI + member number) | SMSF super, awards, classifications |
+| APRA super (USI + member number) | SMSF super; per-employee pay rate. A flat-rate workforce can opt into `employmentHero.defaults` (pay category / rate / hours / award) — see [`eh-pay-defaults.md`](./eh-pay-defaults.md) (#26) |
 | Create + update, one-way CT→EH | Any write back to Connecteam |
 | Clients using the Onboarding feature with an approval step | Forms-based or no-approval clients |
 | Single EH employing entity | Multi-entity businesses |
