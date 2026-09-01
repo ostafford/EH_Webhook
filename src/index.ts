@@ -23,9 +23,9 @@ app.get("/health", async (c) => {
 });
 
 /**
- * Connecteam `user_updated` webhook. Verify the HMAC, answer immediately, and
- * enqueue a `profile_update` sync. The signature check + payload parsing are in
- * src/webhook/inbound.ts; this route only does the enqueue.
+ * Connecteam `user_updated` webhook. Check the shared secret, answer
+ * immediately, and enqueue a `profile_update` sync. The secret check + payload
+ * parsing are in src/webhook/inbound.ts; this route only does the enqueue.
  */
 app.post("/webhook", async (c) => {
   const rawBody = await c.req.text();
@@ -44,7 +44,12 @@ app.post("/webhook", async (c) => {
       return c.json({ error: "could not enqueue" }, 503);
     }
   }
-  logEvent({ evt: "webhook", status: outcome.status, ctUserId: outcome.job?.ctUserId ?? null });
+  logEvent({
+    evt: "webhook",
+    status: outcome.status,
+    ctUserId: outcome.job?.ctUserId ?? null,
+    ...(outcome.shape ? { shape: outcome.shape } : {}),
+  });
   return c.json(outcome.body, outcome.status as 200 | 202 | 400 | 401 | 500);
 });
 

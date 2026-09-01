@@ -45,6 +45,34 @@ export interface DecideInput {
 
 const INCOMPLETE = "incomplete";
 
+/**
+ * EH reports `status: Incomplete` for two very different reasons:
+ *  - data the *employee* entered is missing/invalid (TFN, bank, address, ...)
+ *    -> a Correction message they can act on, OR
+ *  - setup only a *payroll admin* can do in EH: pay-run defaults, award / pay
+ *    rate / classification, employing entity. The sync never touches these
+ *    (out of scope - see docs/PLAN.md), so telling the employee to "fix" them
+ *    is wrong; it must go to the alerts channel as a Manual-follow-up notice.
+ *
+ * `detailedStatus` is a short EH phrase. We reroute the phrases we know are
+ * admin-only (confirmed real: "Pay Run Defaults are incomplete") and leave
+ * everything else as a Correction - matching the previous behaviour for any
+ * phrase we have not seen.
+ */
+const ADMIN_ONLY_INCOMPLETE =
+  /pay run default|pay-run default|pay category|pay rate|\baward\b|classification|employing entity|employee default|leave allowance|opening balance|work type/i;
+
+function incompleteIsAdminOnly(detailedStatus: string | null): boolean {
+  return ADMIN_ONLY_INCOMPLETE.test(detailedStatus ?? "");
+}
+
+function adminIncompleteReason(detailedStatus: string | null): string {
+  const s = (detailedStatus ?? "").trim();
+  return `Employment Hero marked the record incomplete${
+    s ? ` ("${s}")` : ""
+  } - a payroll admin needs to finish the employee's setup in Employment Hero (e.g. pay-run defaults / award / pay rate).`;
+}
+
 export function decide(input: DecideInput): SyncDecision {
   const mappingIssues = input.mappingIssues ?? [];
   if (mappingIssues.length > 0) {
@@ -66,6 +94,14 @@ export function decide(input: DecideInput): SyncDecision {
     case "ok": {
       const { status, detailedStatus } = write.data;
       if ((status ?? "").toLowerCase().includes(INCOMPLETE)) {
+        if (incompleteIsAdminOnly(detailedStatus)) {
+          // Surface any other admin follow-ups (non-resident, SMSF, INTERNATIONAL
+          // address) in the same notice rather than losing them.
+          return {
+            kind: "follow_up",
+            reasons: [adminIncompleteReason(detailedStatus), ...(input.followUps ?? [])],
+          };
+        }
         return { kind: "correction", fields: [incompleteFieldError(detailedStatus)] };
       }
       if (input.readBack && !input.readBack.matched) {
@@ -111,7 +147,17 @@ export function auditDetail(decision: SyncDecision): string {
     case "follow_up":
       return `follow_up: ${decision.reasons.join(" | ")}`;
     case "correction": {
-      const names = [...new Set(decision.fields.map((f) => f.field))];
+      // EH sometimes names the field only in prose ("Tax File Number is
+      // invalid") with no "Field:" prefix, so `field` comes through as
+      // "(unknown)". Fall back to a short redaction-safe slug of the reason so
+      // the audit row still says what failed.
+      const names = [
+        ...new Set(
+          decision.fields.map((f) =>
+            f.field && f.field !== "(unknown)" ? f.field : reasonSlug(f.reason),
+          ),
+        ),
+      ];
       return `correction: ${names.join(", ")}`;
     }
   }
@@ -119,6 +165,12 @@ export function auditDetail(decision: SyncDecision): string {
 
 function issueToFieldError(i: MappingIssue): EhFieldError {
   return { field: i.ehField, reason: i.reason };
+}
+
+/** A short, punctuation-free tag from an EH reason for the audit row. */
+function reasonSlug(reason: string): string {
+  const slug = reason.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug.length > 40 ? slug.slice(0, 40).replace(/-+$/g, "") : slug || "(unknown)";
 }
 
 function incompleteFieldError(detailedStatus: string | null): EhFieldError {

@@ -175,6 +175,10 @@ _Rough total: ~3 working weeks for one engineer._
 
 ## 5. Client runbook outline (`docs/RUNBOOK.md`)
 
+> Fully written in [`RUNBOOK.md`](./RUNBOOK.md) for the **self-host** model
+> (client runs it on their own Cloudflare account; `scripts/setup-wizard.sh` is
+> the happy path). The outline below is the historical skeleton.
+
 1. **Prerequisites checklist** (from Q40 + A40): EH Payroll AU + API access;
    single employing entity; Connecteam Onboarding feature with approval; APRA super;
    awards already configured in EH.
@@ -225,7 +229,15 @@ _Rough total: ~3 working weeks for one engineer._
 ## 7. Open items to verify during the build (not blockers)
 
 - Exact EH enum values: `gender`, residency/tax scale, HELP vs STSL field names.
-- Real EH `422` body shape → seeds the curated error map (M2).
-- Connecteam webhook signature algorithm (`secretKey`) — header name + digest (M3).
+- Real EH `422` body shape → seeds the curated error map (M2). **Resolved (#22):**
+  EH returns HTTP `400` `{ "message": "..." }`; messages come both as
+  `Field: reason` and as bare prose (`"Tax File Number is invalid"`).
+- Connecteam webhook signature algorithm (`secretKey`) — header + digest (M3).
+  **Resolved (#22):** no HMAC. `webhookVersion: 1` sends the `secretKey` verbatim
+  in the `x-webhook-secret` header. `secretKey` is settable via the API only.
 - Un-approve behaviour: does the assignment leave `status: completed`? (M6)
+  **Resolved (#22): no** — re-approval is not a reliable resync trigger; only a
+  profile edit (`user_updated`) or a first-time `completed` is.
+- Connecteam webhook granularity. **Resolved (#22):** one delivery **per changed
+  field**; `data` is an array. The consumer coalesces the burst per user.
 - Connecteam exact rate-limit numbers under load (M6) — headers already show 200/min, 20k/day.

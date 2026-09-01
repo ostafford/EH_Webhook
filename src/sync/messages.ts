@@ -33,7 +33,7 @@ const CURATED: CuratedLine[] = [
   { match: /accountname/, line: "The account-holder name on your bank account is missing - add it in Connecteam." },
   { match: /bankaccount|bank details|bankdetails/, line: "Your bank account details couldn't be saved - check the BSB, account number and account-holder name in Connecteam." },
   { match: /taxfilenumber|tax file number|\btfn\b/, line: "Your Tax File Number doesn't appear to be valid - re-check the 9 digits and re-enter it in Connecteam." },
-  { match: /taxfree|tax declaration|taxdeclaration|australianresident|not an australian resident|helpdebt|stsldebt|tax details|taxdetails/, line: "Your tax declaration answers are missing or inconsistent - review the tax questions in Connecteam." },
+  { match: /tax[-\s]?free|tax declaration|taxdeclaration|australianresident|non-resident|not an australian resident|helpdebt|stsldebt|tax details|taxdetails/, line: "Your tax declaration answers are missing or inconsistent - review the tax questions in Connecteam." },
   { match: /startdate|start date/, line: "Your employment start date is missing or in the wrong format - re-enter it in Connecteam." },
   { match: /dateofbirth|date of birth|birthday|\bdob\b/, line: "Your date of birth is missing or in the wrong format - re-enter it in Connecteam." },
   { match: /employmenttype|employment type/, line: "Your employment type must be Full time, Part time, Casual or Labour hire - update it in Connecteam." },
@@ -80,10 +80,28 @@ export function correctionMessage(fields: EhFieldError[]): string {
   return clamp(body);
 }
 
+/**
+ * How an employee is referred to in an admin-facing message. The name makes the
+ * channel scannable; the id stays for an unambiguous lookup. Falls back to
+ * "Connecteam user <id>" when the name is not to hand (e.g. a dead-letter alert
+ * raised without a fresh user fetch).
+ */
+export interface PersonRef {
+  ctUserId: number;
+  firstName?: string | null | undefined;
+  lastName?: string | null | undefined;
+}
+
+export function personLabel(ref: PersonRef): string {
+  const name = [ref.firstName, ref.lastName].map((s) => (s ?? "").trim()).filter(Boolean).join(" ");
+  return name ? `${name} (${ref.ctUserId})` : `Connecteam user ${ref.ctUserId}`;
+}
+
 /** Correction message -> the Direct manager, on the 3rd failed cycle in a row. */
-export function managerEscalationMessage(fields: EhFieldError[]): string {
+export function managerEscalationMessage(fields: EhFieldError[], ref?: PersonRef): string {
+  const who = ref ? ` (${personLabel(ref)})` : "";
   const body = [
-    "Heads up: an employee you manage has had their payroll details fail to sync three times in a row.",
+    `Heads up: an employee you manage${who} has had their payroll details fail to sync three times in a row.`,
     "They've been asked to correct:",
     ...friendlyLines(fields).map((l) => `- ${l}`),
     "Please check in with them so payroll can be completed.",
@@ -92,11 +110,11 @@ export function managerEscalationMessage(fields: EhFieldError[]): string {
 }
 
 /** Manual-follow-up notice -> the admin channel. */
-export function followUpNoticeMessage(reasons: string[], ref: { ctUserId: number }): string {
+export function followUpNoticeMessage(reasons: string[], ref: PersonRef): string {
   const items =
     reasons.length > 0 ? reasons : ["A payroll admin needs to review this record in Employment Hero."];
   const body = [
-    `Payroll follow-up needed for Connecteam user ${ref.ctUserId}:`,
+    `Payroll follow-up needed for ${personLabel(ref)}:`,
     ...items.map((r) => `- ${r}`),
     "The sync completed with safe defaults - finish this by hand in Employment Hero.",
   ].join("\n");
@@ -104,9 +122,9 @@ export function followUpNoticeMessage(reasons: string[], ref: { ctUserId: number
 }
 
 /** System alert -> the admin channel, when a queue message dead-letters. */
-export function systemAlertMessage(detail: string, ref: { ctUserId: number }): string {
+export function systemAlertMessage(detail: string, ref: PersonRef): string {
   const body = [
-    `Payroll sync failed for Connecteam user ${ref.ctUserId} and could not be retried.`,
+    `Payroll sync failed for ${personLabel(ref)} and could not be retried.`,
     detail.trim() ? `Detail: ${detail.trim()}` : "No further detail was returned.",
     "No employee action is possible - check the Employment Hero API status and credentials.",
   ].join("\n");

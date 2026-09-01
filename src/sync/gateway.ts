@@ -20,7 +20,10 @@ export interface EmployeeLinkPatch {
   ctUserId: number;
   ehEmployeeId: string | null;
   lastSyncedTs: number | null;
-  /** Null on any non-clean outcome, so the next event always re-syncs. */
+  /**
+   * The mapped-payload hash of this attempt, clean or not, so a byte-identical
+   * re-delivery is skipped. A real later edit changes the payload and its hash.
+   */
   lastPayloadHash: string | null;
 }
 

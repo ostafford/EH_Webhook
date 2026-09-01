@@ -2,23 +2,32 @@
  * Verifies that an inbound webhook really came from Connecteam, using the
  * `CT_WEBHOOK_SECRET` shared with the webhook registration.
  *
- * Connecteam does not publish the header name or encoding. `DEFAULT_SCHEME`
- * below is the common convention (HMAC-SHA256 of the raw request body, lowercase
- * hex, header `x-connecteam-signature`). Confirm against a real delivery when the
- * webhook is first registered (docs/PLAN.md runbook step 8) and adjust
- * `DEFAULT_SCHEME` if needed - the verify logic and the /webhook route do not
- * change. `verifyWebhookSignature` already accepts an override scheme, and the
- * header name is read from `DEFAULT_SCHEME.header` in src/index.ts.
+ * Connecteam webhook `webhookVersion: 1` (the only version as of 2026-08) does
+ * NOT sign the body. It sends the registered `secretKey` verbatim in the
+ * `x-webhook-secret` header - a static shared secret, no HMAC. That is what
+ * `DEFAULT_SCHEME` below encodes, and it was confirmed against a real delivery
+ * during the #22 guided deployment (see docs/RUNBOOK.md step 6).
+ *
+ * The `hmac` mode is kept for a future signed version / another source: pass an
+ * explicit `{ mode: "hmac", encoding }` scheme and the raw body is HMAC-SHA256'd
+ * and compared. The `/webhook` route reads the header name from
+ * `DEFAULT_SCHEME.header` (src/index.ts) either way.
  */
 export interface SignatureScheme {
-  /** Lower-cased HTTP header that carries the signature. */
+  /**
+   * `shared_secret` - the header carries the secret verbatim (Connecteam v1).
+   * `hmac`          - the header carries HMAC-SHA256(rawBody) in `encoding`.
+   */
+  mode: "shared_secret" | "hmac";
+  /** Lower-cased HTTP header that carries the value. */
   header: string;
-  encoding: "hex" | "base64";
+  /** Only read in `hmac` mode. Defaults to `hex`. */
+  encoding?: "hex" | "base64";
 }
 
 export const DEFAULT_SCHEME: SignatureScheme = {
-  header: "x-connecteam-signature",
-  encoding: "hex",
+  mode: "shared_secret",
+  header: "x-webhook-secret",
 };
 
 const enc = new TextEncoder();
@@ -31,6 +40,10 @@ export async function verifyWebhookSignature(
 ): Promise<boolean> {
   if (!headerValue || !secret) return false;
 
+  if (scheme.mode === "shared_secret") {
+    return timingSafeEqual(headerValue.trim(), secret);
+  }
+
   const key = await crypto.subtle.importKey(
     "raw",
     enc.encode(secret),
@@ -39,7 +52,7 @@ export async function verifyWebhookSignature(
     ["sign"],
   );
   const mac = await crypto.subtle.sign("HMAC", key, enc.encode(rawBody));
-  const expected = scheme.encoding === "hex" ? toHex(mac) : toBase64(mac);
+  const expected = scheme.encoding === "base64" ? toBase64(mac) : toHex(mac);
   return timingSafeEqual(expected, headerValue.trim());
 }
 

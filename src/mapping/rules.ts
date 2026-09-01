@@ -22,7 +22,14 @@ export const EH_FIELD = {
   superProductCode: "superFund1_ProductCode", // APRA fund USI / product code
   superFundName: "superFund1_FundName",
   superMemberNumber: "superFund1_MemberNumber",
+  // EH rejects any super detail unless an allocation is given and the
+  // allocations across funds sum to 100. v1 syncs a single APRA fund, so it is
+  // always 100. (Mirrors bankAccount1_AllocatedPercentage in the field map.)
+  superAllocatedPercentage: "superFund1_AllocatedPercentage",
 } as const;
+
+/** v1 syncs exactly one APRA fund, so its contribution allocation is 100%. */
+const SINGLE_FUND_ALLOCATION = 100;
 
 export const FOLLOW_UP = {
   nonResident:
@@ -83,6 +90,16 @@ export function applyTaxDeclaration(
     if (!resident) out.followUps.push(FOLLOW_UP.nonResident);
   }
 
+  // A non-resident for tax cannot claim the tax-free threshold - EH rejects the
+  // combination with a 400. Catch it here with an actionable message instead.
+  if (resident === false && tft === true) {
+    out.issues.push({
+      ehField: EH_FIELD.claimTaxFreeThreshold,
+      source: "tax declaration",
+      reason: "a non-resident for tax cannot claim the tax-free threshold - set that answer to No",
+    });
+  }
+
   const help = readBool(EH_FIELD.helpDebt, td.hasHelpOrStslDebt.customFieldId);
   if (help !== undefined) {
     out.fields[EH_FIELD.helpDebt] = help;
@@ -106,6 +123,7 @@ export function applySuper(user: ConnecteamUser, sup: NonNullable<Rules>["super"
 
   if (hasUsi) {
     // APRA-regulated fund. EH calls the USI the "product code".
+    out.fields[EH_FIELD.superAllocatedPercentage] = SINGLE_FUND_ALLOCATION;
     try {
       out.fields[EH_FIELD.superProductCode] = trimString(usi.value);
     } catch (err) {

@@ -131,7 +131,7 @@ describe("queue consumer (in workerd, real D1)", () => {
 
     // Same payload, newer event -> unchanged, no-op.
     const again = await runSyncJob(job({ eventTimestamp: 2000 }), world().deps);
-    expect(again).toMatchObject({ status: "skipped", reason: "unchanged since last sync" });
+    expect(again).toMatchObject({ status: "skipped", reason: "identical to the last processed state" });
 
     // Older/duplicate event -> stale, no-op.
     const stale = await runSyncJob(job({ eventTimestamp: 1000 }), world().deps);
@@ -156,7 +156,23 @@ describe("queue consumer (in workerd, real D1)", () => {
       .bind(syntheticUser.userId)
       .first<{ failure_cycle_count: number; last_payload_hash: string | null }>();
     expect(row?.failure_cycle_count).toBe(1);
-    expect(row?.last_payload_hash).toBeNull();
+    // Stored even on a correction, so an identical re-delivery is skipped.
+    expect(row?.last_payload_hash).toBeTruthy();
+  });
+
+  it("skips an identical re-delivery for an employee stuck in correction (no re-message, no cycle bump)", async () => {
+    const w = world({ ehValidationMessage: "BankAccount1: BSB must contain 6 digits only" });
+    await runSyncJob(job({ eventTimestamp: 1000 }), w.deps);
+
+    const w2 = world({ ehValidationMessage: "BankAccount1: BSB must contain 6 digits only" });
+    const again = await runSyncJob(job({ eventTimestamp: 2000 }), w2.deps);
+
+    expect(again).toMatchObject({ status: "skipped", reason: "identical to the last processed state" });
+    expect(w2.sent.dms).toHaveLength(0);
+    const row = await env.DB.prepare("SELECT failure_cycle_count FROM employee_map WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .first<{ failure_cycle_count: number }>();
+    expect(row?.failure_cycle_count).toBe(1);
   });
 
   it("acks a good message and retries an outage through a real MessageBatch", async () => {

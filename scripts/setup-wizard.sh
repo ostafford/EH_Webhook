@@ -208,6 +208,12 @@ wr() { npx --yes wrangler "$@"; }
 # ct_api PATH: GET the Connecteam API with the captured key.
 ct_api() { curl -sS -H "X-API-KEY: $CT_API_KEY" -H "accept: application/json" "https://api.connecteam.com$1"; }
 
+# ct_api_post PATH JSON: POST to the Connecteam API with the captured key.
+ct_api_post() {
+  curl -sS -X POST -H "X-API-KEY: $CT_API_KEY" -H "content-type: application/json" \
+    -H "accept: application/json" -d "$2" "https://api.connecteam.com$1"
+}
+
 # put_secret NAME VALUE: pipe a value into `wrangler secret put` (no echo).
 put_secret() {
   printf '%s' "$2" | wr secret put "$1" >/dev/null \
@@ -343,14 +349,31 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Register the Connecteam webhook"
-say "Register a webhook so profile edits sync after go-live."
-note "URL:     ${WORKER_URL:-https://<your-worker>.workers.dev}/webhook"
-note "Feature: users"
-note "Secret:  $CT_WEBHOOK_SECRET"
-open_url "https://app.connecteam.com/#/settings/integrations/api"
-step "Register the webhook with the three values above (UI, or POST /settings/v1/webhooks)."
-step "Then edit a test user's profile and confirm their Employment Hero record updates."
-warn "If the first delivery is rejected, capture its headers + body and adjust DEFAULT_SCHEME in src/connecteam/signature.ts."
+say "Registers the user_updated webhook so profile edits sync after go-live."
+WEBHOOK_TARGET="${WORKER_URL:-https://<your-worker>.workers.dev}/webhook"
+note "URL:    $WEBHOOK_TARGET"
+note "Event:  users / user_updated"
+say ""
+say "The signing secret (secretKey) can ONLY be set via the API - the Connecteam"
+say "UI has no field for it, and the Worker rejects every unsigned delivery with"
+say "401. So the wizard registers it here rather than sending you to the UI."
+if [[ -n "${WORKER_URL:-}" ]]; then
+  reg=$(ct_api_post "/settings/v1/webhooks" "$(printf '{"name":"EH Payroll Sync (profile updates)","url":"%s","featureType":"users","eventTypes":["user_updated"],"secretKey":"%s"}' "$WEBHOOK_TARGET" "$CT_WEBHOOK_SECRET")")
+  wid=$(printf '%s' "$reg" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).data?.id||"")}catch(e){console.log("")}})')
+  if [[ -n "$wid" ]]; then
+    printf '  %s✓ registered%s webhook id %s\n' "$GREEN" "$RESET" "$wid"
+  else
+    warn "could not confirm the webhook registered. Response:"
+    printf '%s\n' "$reg" | sed 's/^/    /'
+    SKIPPED+=("Connecteam webhook - register by API: POST /settings/v1/webhooks (see docs/RUNBOOK.md step 6)")
+  fi
+else
+  warn "no deployed URL captured - register the webhook by hand once the Worker is live (docs/RUNBOOK.md step 6)."
+  SKIPPED+=("Connecteam webhook registration (no Worker URL was captured)")
+fi
+step "Edit a test user's profile and confirm their Employment Hero record updates."
+say "The first real delivery was used to confirm the signature scheme in"
+say "src/connecteam/signature.ts (header x-webhook-secret, no HMAC) during #22."
 
 finish
 say "Next: approve a test onboarding pack and watch the employee appear in Employment Hero within ~1 minute."

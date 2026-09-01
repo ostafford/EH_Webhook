@@ -55,6 +55,24 @@ describe("decide", () => {
     expect(d).toMatchObject({ fields: [{ field: "(incomplete)" }] });
   });
 
+  it("Incomplete for an admin-only reason (pay run defaults) becomes a follow_up, not a correction", () => {
+    const d = decide({ write: okWrite({ status: "Incomplete", detailedStatus: "Pay Run Defaults are incomplete" }) });
+    expect(d.kind).toBe("follow_up");
+    expect(d).toMatchObject({ reasons: [expect.stringContaining("Pay Run Defaults are incomplete")] });
+  });
+
+  it("keeps other admin follow-ups alongside an admin-only Incomplete reason", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Pay Run Defaults are incomplete" }),
+      followUps: ["Non-resident - set the tax scale by hand."],
+    });
+    expect(d.kind).toBe("follow_up");
+    expect((d as { reasons: string[] }).reasons).toEqual([
+      expect.stringContaining("Pay Run Defaults are incomplete"),
+      "Non-resident - set the tax scale by hand.",
+    ]);
+  });
+
   it("a read-back mismatch on a clean-status write becomes a correction", () => {
     const d = decide({
       write: okWrite(),
@@ -142,6 +160,15 @@ describe("auditDetail", () => {
         ],
       }),
     ).toBe("correction: bankAccount1_BSB, taxFileNumber");
+  });
+
+  it("falls back to a reason slug when EH did not name the field", () => {
+    expect(
+      auditDetail({
+        kind: "correction",
+        fields: [{ field: "(unknown)", reason: "Tax File Number is invalid" }],
+      }),
+    ).toBe("correction: tax-file-number-is-invalid");
   });
 
   it("summarises the other kinds", () => {

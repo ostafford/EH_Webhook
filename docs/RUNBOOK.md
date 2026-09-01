@@ -1,230 +1,371 @@
-# Deployment runbook — Connecteam → EH Payroll sync
+# Deployment runbook — Connecteam → Employment Hero Payroll sync
 
-One deployment serves **one client**. Everything client-specific is external config
-(vars, secrets, and `clients/<slug>/field-map.json`) — **no code changes**. Follow
-this document top to bottom for a fresh client.
+This integration is **self-hosted**: the client runs it on **their own Cloudflare
+account**, one deployment for their business. Everything client-specific is
+external config (`wrangler.jsonc` vars, Cloudflare secrets, and
+`clients/self/field-map.json`) — **no code changes**.
 
-Glossary terms (**custom publisher**, **alerts channel**, **Correction message**,
-**Manual-follow-up notice**, **System alert**, **Onboarding pack**) are defined in
-[`../CONTEXT.md`](../CONTEXT.md). Companion: [`PLAN.md`](./PLAN.md) §5.
-
-> **Scripts.** `scripts/setup-wizard.sh` walks the whole of §1–§8 interactively —
-> it opens each page, captures the values, provisions D1 + Queues, pushes the
-> secrets and deploys. The steps below are the reference it follows. After
-> go-live, `scripts/update.sh` pulls, re-tests, migrates and redeploys.
-> _(A full rewrite of this runbook for the self-host model is tracked in #21.)_
+Glossary terms — **custom publisher**, **alerts channel**, **Correction message**,
+**Manual-follow-up notice**, **System alert**, **Onboarding pack**, **Sync** — are
+defined in [`../CONTEXT.md`](../CONTEXT.md).
 
 ---
 
-## 0. Prerequisites (confirm with the client before starting)
+## Who does what
 
-- Employment Hero **Payroll** (AU) with API access, and a **single** employing entity.
-- Connecteam with the **Onboarding** feature and an **approval step** in the pack.
-- Employees enter APRA super (USI + member number). SMSF is handled by a
-  Manual-follow-up notice, not synced.
-- Awards / pay rates are already configured in Employment Hero — the sync does not set them.
-- A Cloudflare account with Workers, Queues and D1.
+| | |
+|---|---|
+| **Client's technical person** | Runs this document / the wizard. Owns the Cloudflare account and the deployment from then on. |
+| **Integrator** | Joins a one-time ~1 hr onboarding call: helps create the Connecteam objects and API keys, watches the wizard run, confirms `/health`. Never holds the client's credentials or deploys for them. |
+| **Client's HR / payroll admins** | No setup role. After go-live they action the three message types (see [Operations](#day-to-day-operations)). |
+
+The whole of steps 1–7 is driven by **`scripts/setup-wizard.sh`** — it opens each
+page, captures every value, provisions D1 + Queues, pushes the secrets and
+deploys. The sections below are the reference the wizard follows; read them once,
+then run the wizard.
 
 ---
 
-## 1. Connecteam setup (client does this in the Connecteam UI + gives you the values)
+## Prerequisites
 
-The Worker cannot create these; the client creates them by hand and hands you the IDs.
+**Accounts**
 
-### 1a. API key
-Settings → API. Create a key with read access to users + onboarding and write
-access to chat. This becomes the **`CT_API_KEY`** secret.
+- **Employment Hero Payroll** (AU) with API access, and a **single** employing entity.
+- **Connecteam** with the **Onboarding** feature and an **approval step** in the pack.
+- A **Cloudflare account on the Workers Paid plan** (~$5/month). Cloudflare
+  **Queues** — which the sync pipeline uses — is not available on the free plan.
+  D1, Workers and Cron triggers are covered by the free allowances; Queues adds a
+  small per-operation cost on top of the $5.
 
-### 1b. Custom publisher — *the sender of every message*
+**Assumptions baked into v1**
+
+- Employees enter **APRA** super (USI + member number); the sync writes a single
+  fund at 100% allocation. SMSF is surfaced as a Manual-follow-up notice, not synced.
+- Awards / pay rates / **pay-run defaults** are set up in Employment Hero by a
+  payroll admin — the sync never sets them. Until an admin does, EH reports the
+  new record as **`Incomplete`** and the sync raises a **Manual-follow-up
+  notice** to the alerts channel (it is *not* sent to the employee as a
+  Correction). See [Verify & go live](#7-verify--go-live).
+- Onboarding-pack approval is a real step (the initial Sync fires when a pack
+  first reaches `status: completed`). **Re-approving** a pack is *not* a reliable
+  way to force a resync — see [Operations](#re-syncing-an-employee).
+
+**Local tools** (on the machine doing the deploy)
+
+- Node 20+ and npm
+- `git`, `curl`
+- `npx wrangler` (installed automatically by `npm install`)
+
+---
+
+## 1. Get the code
+
+```bash
+git clone <this-repo> eh-webhook
+cd eh-webhook
+npm install
+```
+
+One clone = one client. The deployment loads `clients/self/field-map.json`
+automatically; `FIELD_MAP_CLIENT` is left blank. (The `clients/` folder and
+`src/mapping/registry.ts` only matter if you ever run several clients from one
+deployment.)
+
+---
+
+## 2. Connecteam setup
+
+The Worker cannot create these — a human makes them in the Connecteam UI and the
+wizard captures the IDs. The integrator usually drives this part of the call.
+
+### 2a. API key
+Settings → API. Create a key with **read** on users + onboarding and **write** on
+chat. → **`CT_API_KEY`** (Cloudflare secret).
+
+### 2b. Custom publisher — *the sender of every message*
 Settings → Feed settings → create a custom publisher named e.g. **"EH Sync"**.
 Note its **publisher ID**.
 
-- **What it is:** a named non-human sender that the chat API posts as.
+- **What it is:** a named non-human sender that the Connecteam chat API can post as.
 - **What it's for:** the sync sends three kinds of message — the **Correction
-  message** to an employee, the **Manual-follow-up notice** and the **System
-  alert** to the alerts channel — and *all three* are sent as this one publisher,
-  so messages are clearly "from the payroll sync", not from a person.
-- **Why this way:** the Connecteam chat API can only post as a real user or a
-  custom publisher. A custom publisher means no staff member's name is attached
-  to automated payroll messages, and the sender never leaves the company.
+  message** to an employee, and the **Manual-follow-up notice** + **System alert**
+  to the alerts channel — and *all three* are sent as this one publisher, so they
+  read as "from the payroll sync", not from a colleague.
+- **Why this way:** the chat API can only post as a real user or a custom
+  publisher. A custom publisher means no staff member's name is attached to
+  automated payroll messages, and the sender can't leave the company.
 
-→ **`CT_CUSTOM_PUBLISHER_ID`** var.
+→ **`CT_CUSTOM_PUBLISHER_ID`** (`wrangler.jsonc` var).
 
-### 1c. Alerts channel — *where admin-facing messages go*
+### 2c. Alerts channel — *where admin-facing messages go*
 Chat → create a channel named e.g. **"EH Sync Alerts"**. Add the payroll admins
-who should action alerts. Get its conversation ID from
-`GET /chat/v1/conversations`.
+who should action alerts. The wizard lists channels via `GET /chat/v1/conversations`
+so you can pick its ID.
 
 - **What it is:** a normal Connecteam chat channel.
 - **What it's for:** it receives the **Manual-follow-up notice** (data synced but
   a payroll admin must finish something by hand — non-resident tax scale, SMSF
-  super, INTERNATIONAL address) and the **System alert** (a sync that
-  dead-lettered — EH outage, auth failure, a bug). The **Correction message**
-  does *not* go here — it goes directly to the employee who entered the bad data
-  (and, on the third failed attempt in a row, also to their direct manager).
-- **Why a channel and not per-admin DMs:** admins are added to or removed from the
-  channel in the Connecteam UI, with no config change and no redeploy. A DM list
-  would have to live in config and be edited every time the payroll team changes.
+  super, `INTERNATIONAL` address) and the **System alert** (a Sync that
+  dead-lettered — Employment Hero outage, auth failure, a bug). The **Correction
+  message** does *not* come here — it goes straight to the employee who entered
+  the bad data, and to their **Direct manager** on the third failed attempt in a row.
+- **Why a channel, not per-admin DMs:** admins join or leave the channel in the
+  Connecteam UI with no config change and no redeploy. A DM list would have to
+  live in config and be edited every time the payroll team changes.
 
-→ **`ADMIN_CONNECTEAM_CHANNEL_ID`** var.
+→ **`ADMIN_CONNECTEAM_CHANNEL_ID`** (`wrangler.jsonc` var).
 
-### 1d. Onboarding pack ID
-`GET /onboarding/v1/packs` → the pack employees complete. → **`CT_ONBOARDING_PACK_ID`** var.
+### 2d. Onboarding pack
+The pack employees complete. The wizard lists packs via `GET /onboarding/v1/packs`.
+→ **`CT_ONBOARDING_PACK_ID`** (`wrangler.jsonc` var).
 
-### 1e. Webhook secret
-Generate a random string (e.g. `openssl rand -hex 32`). You will give this same
-value to Connecteam when you register the webhook in step 8. → **`CT_WEBHOOK_SECRET`** secret.
-
-> The webhook itself is registered **after** deploy (step 8) because it needs the
-> Worker's live URL.
+### 2e. Webhook secret
+The wizard generates a random 32-byte hex string. The same value is given to
+Connecteam when the webhook is registered (step 5). → **`CT_WEBHOOK_SECRET`**
+(Cloudflare secret).
 
 ---
 
-## 2. Employment Hero Payroll setup
+## 3. Employment Hero Payroll setup
 
-1. Create an API key → **`EH_API_KEY`** secret.
+1. Create an API key → **`EH_API_KEY`** (Cloudflare secret).
 2. **Disable the employee self-setup email** for the business (Payroll settings →
-   employee onboarding). The sync creates and completes the employee record via
-   the API; the setup email would confuse employees.
-3. Record the structural IDs (step 4 fetches these for you):
+   employee onboarding). The sync creates and completes the record via the API;
+   the setup email would confuse employees.
+3. The structural IDs are discovered for you in the next step:
    - `businessId` — `GET /api/v2/business` → **`EH_BUSINESS_ID`**
    - pay schedule ID — `GET /business/{id}/payschedule` → **`EH_PAY_SCHEDULE_ID`**
    - location ID — `GET /business/{id}/location` → **`EH_LOCATION_ID`**
 
 ---
 
-## 3–5. Field map
+## 4. Field map
 
-### 3. Put both API keys in `.dev.vars`
-```
-CT_API_KEY=...
-EH_API_KEY=...
-```
-(Optionally also `EH_BUSINESS_ID=` and `CT_ONBOARDING_PACK_ID=` to skip the pickers.)
+The wizard runs this; here is what it does.
 
-### 4. Run the discovery helper
+```bash
+npm run discover -- --client self
 ```
-npm run discover -- --client <slug>
-```
-This reads the client's Connecteam custom-field **names** and Employment Hero
-structural IDs and writes:
-- `clients/<slug>/field-map.json` — a **draft** mapping (schema-checked).
-- stdout — a **configuration checklist**: every var and secret with the
+
+Reads the client's Connecteam custom-field **names** and the Employment Hero
+structural IDs, then writes:
+
+- **`clients/self/field-map.json`** — a schema-checked draft mapping (overwrites
+  the placeholder that ships in the repo).
+- **stdout** — a configuration checklist: every var and secret with the
   discovered value or a `TODO` and where to find it.
 
 It writes field **names** and IDs only — never an employee value.
 
-### 5. Register the client and tune the field map
-1. Add the client to [`../src/mapping/registry.ts`](../src/mapping/registry.ts):
-   an `import` of `clients/<slug>/field-map.json` and one entry in `FIELD_MAPS`.
-2. Open `clients/<slug>/field-map.json` and check **every** mapped `customFieldId`
-   against the client's real fields. Resolve any `TODO`. Confirm the enum `map`s
-   (gender, `residentialState` INTERNATIONAL, `employmentType`) match the
-   client's dropdown option text.
-3. `npm test` — the field-map loader tests will fail fast on an invalid map.
+**Then tune the draft.** Open `clients/self/field-map.json` and:
+
+- Check **every** mapped `customFieldId` against the client's real fields.
+- Resolve any `TODO` (usually the super field IDs and `EH_*` IDs).
+- Confirm the enum `map`s match the client's dropdown option text — `gender`,
+  `residentialState` (incl. `INTERNATIONAL`), `employmentType`.
+
+`npm test` fails fast on an invalid map.
 
 ---
 
-## 6. Cloudflare setup
+## 5. Cloudflare deploy
+
+The wizard does all of this. Manual equivalent:
 
 ```bash
-# D1
-wrangler d1 create eh-webhook-<slug>
-# → put the returned database_id into wrangler.jsonc d1_databases[0].database_id
-wrangler d1 migrations apply eh-webhook-<slug> --remote
+# Log in to the CLIENT's account
+npx wrangler login
+npx wrangler whoami          # confirm it's the right account
 
-# Queues
-wrangler queues create eh-webhook-sync
-wrangler queues create eh-webhook-dlq
+# Provision (one D1 database, two queues)
+npx wrangler d1 create eh-webhook
+#   → put the returned database_id into wrangler.jsonc  d1_databases[0].database_id
+npx wrangler d1 migrations apply eh-webhook --remote
+npx wrangler queues create eh-webhook-sync
+npx wrangler queues create eh-webhook-dlq
 
 # Secrets
-wrangler secret put CT_API_KEY
-wrangler secret put EH_API_KEY
-wrangler secret put CT_WEBHOOK_SECRET
+npx wrangler secret put CT_API_KEY
+npx wrangler secret put EH_API_KEY
+npx wrangler secret put CT_WEBHOOK_SECRET
 
-# Vars: set these in wrangler.jsonc "vars"
-#   FIELD_MAP_CLIENT, EH_BUSINESS_ID, EH_PAY_SCHEDULE_ID, EH_LOCATION_ID,
+# Vars — set in wrangler.jsonc "vars" (leave FIELD_MAP_CLIENT blank):
+#   EH_BUSINESS_ID, EH_PAY_SCHEDULE_ID, EH_LOCATION_ID,
 #   CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID, ADMIN_CONNECTEAM_CHANNEL_ID
-```
 
-Set a route or custom domain for the Worker in `wrangler.jsonc`.
-
-Verify the build before deploying:
-```
+# Verify, then deploy
 npm run typecheck && npm test
-CLOUDFLARE_API_TOKEN=<token> npx wrangler deploy --dry-run --outdir /tmp/x
+npx wrangler deploy
+curl https://<worker>.workers.dev/health
 ```
 
+The Worker's URL is a free `*.workers.dev` address by default — nothing to set
+up. To serve it from the client's own domain instead, add a route / custom domain
+in `wrangler.jsonc` (needs the domain on Cloudflare); the webhook URL in step 5
+changes accordingly.
+
+`/health` must return **`200`** with `d1: "ok"` and `fieldMap: "ok"`.
+`config.fieldMapClient` should read `"self"`. The `ops` block is explained in
+[Operations](#day-to-day-operations).
+
 ---
 
-## 7. Deploy
+## 6. Register the Connecteam webhook
 
+Needs the deployed URL, so it comes after deploy. The wizard does this in its
+last stage; the manual equivalent is below.
+
+**It must be done via the API, not the Connecteam UI.** The webhook's signing
+secret (`secretKey`) can only be set through `POST /settings/v1/webhooks` — the
+UI has no field for it — and the Worker rejects every delivery that arrives
+without a matching secret with `401`. A UI-created webhook will therefore never
+work.
+
+```bash
+set -a; source .dev.vars; set +a          # CT_API_KEY, CT_WEBHOOK_SECRET
+curl -sS -X POST "https://api.connecteam.com/settings/v1/webhooks" \
+  -H "X-API-KEY: $CT_API_KEY" -H "content-type: application/json" \
+  -d '{
+        "name": "EH Payroll Sync (profile updates)",
+        "url": "https://<worker>.workers.dev/webhook",
+        "featureType": "users",
+        "eventTypes": ["user_updated"],
+        "secretKey": "'"$CT_WEBHOOK_SECRET"'"
+      }'
 ```
-npm run deploy
-curl https://<worker-domain>/health
-```
 
-`/health` must return `200` with `d1: "ok"` and `fieldMap: "ok"`. `config.fieldMapClient`
-must be your `<slug>`. See §10 for the `ops` block.
+A `200` with `data.id` means it is registered. List them any time with
+`GET /settings/v1/webhooks`.
 
----
+> **Signature scheme (confirmed against a real delivery, #22).**
+> Connecteam webhook `webhookVersion: 1` does **not** sign the body. It sends the
+> registered `secretKey` verbatim in the **`x-webhook-secret`** header.
+> `src/connecteam/signature.ts` `DEFAULT_SCHEME` reflects this
+> (`mode: "shared_secret"`). An `hmac` mode is kept in that file for a future
+> signed version; switching needs only a new `DEFAULT_SCHEME`, not route changes.
 
-## 8. Register the Connecteam webhook (needs the live URL)
-
-Register a webhook for the **`users`** feature pointing at
-`https://<worker-domain>/webhook`, with the **`CT_WEBHOOK_SECRET`** from step 1e,
-either via `POST /settings/v1/webhooks` or the Connecteam UI.
-
-> **First real delivery:** confirm the signature scheme. `src/connecteam/signature.ts`
-> `DEFAULT_SCHEME` assumes a lowercase-hex HMAC-SHA256 of the raw body in the
-> `x-connecteam-signature` header. If a real delivery is rejected, capture one
-> delivery's headers + body and adjust `DEFAULT_SCHEME` — nothing else changes.
+> **Delivery volume.** Connecteam fires one `user_updated` delivery **per changed
+> field**, so a single profile edit arrives as a burst (you'll see several
+> `202`s in the logs). The queue consumer coalesces a burst for one user into a
+> single Sync — no duplicate messages or record writes.
 
 ---
 
-## 9. Verify & go live
+## 7. Verify & go live
 
-1. **Approval path:** approve one test employee's Onboarding pack → within ~1
-   minute they appear in Employment Hero (the cron sweep runs every minute).
-2. **Edit path:** change that employee's Connecteam profile → their EH record updates.
-3. **Correction path:** enter a deliberately bad BSB → the employee gets a
-   Correction message from the custom publisher.
-4. **Follow-up path:** set a test employee to non-resident → a Manual-follow-up
-   notice appears in the alerts channel; the sync still completes.
-5. **Go live:** existing approved employees flow in over the next few minutes via
-   the sweep, throttled (~20 per minute). Watch `/health` and the alerts channel.
+| Path | Test | Expected |
+|---|---|---|
+| Approval | Approve a test employee's Onboarding pack | They appear in Employment Hero within ~1 min (the sweep runs every minute) |
+| Edit | Change that employee's Connecteam profile | Their EH record updates (via the `user_updated` webhook — step 6) |
+| Correction | Enter a deliberately bad BSB | The employee gets a **Correction message** from the custom publisher |
+| Follow-up | Set a test employee to non-resident | A **Manual-follow-up notice** appears in the **alerts channel**; the Sync still completes |
+| Incomplete | Sync an employee who has **no award / pay-run defaults** in EH | The record is created but EH marks it `Incomplete`; a **Manual-follow-up notice** ("a payroll admin needs to finish setup … pay-run defaults / award / pay rate") goes to the alerts channel — **not** to the employee. A payroll admin sets the award in EH; the record then reads `Complete`. |
+
+`INTERNATIONAL` address and SMSF super (fund ABN, no USI) also produce a
+Manual-follow-up notice. When several apply at once (e.g. a non-resident whose
+record is also `Incomplete` for pay-run defaults) they are listed together in a
+single notice.
+
+> A non-resident for tax who *also* answered "yes" to the tax-free threshold is a
+> contradiction EH rejects — the sync catches it first and sends the employee a
+> Correction ("set that answer to No"), not a follow-up.
+
+**Go live:** existing approved employees flow in over the next few minutes via the
+sweep, throttled (~20/minute). Watch `/health` and the alerts channel.
 
 ---
 
-## 10. Day-to-day operations
+## 8. Grant the integrator scoped Cloudflare access (recommended)
+
+So the integrator can diagnose and fix problems on the client's deployment
+without a screen-share every time.
+
+1. Cloudflare dashboard → **Manage Account → Members → Invite**.
+2. Invite the integrator's Cloudflare email.
+3. Role: **Workers Admin** (or a custom role limited to Workers Scripts, D1,
+   Queues and Logs — nothing account-wide).
+4. The client can change the role or **remove the member** at any time from the
+   same page. It is the client's grant, not the integrator's ownership.
+
+Without this, the only support routes are a screen-share or the client running
+`scripts/update.sh` under instruction.
+
+---
+
+## 9. Optional: integrator telemetry
+
+Off by default. When set, the Worker also sends the integrator a copy of each
+**System alert** (deduped to once per employee per hour) and a once-a-day
+`/health` summary, so the integrator learns about a problem before the client emails.
+
+- `INTEGRATOR_ALERT_URL` (`wrangler.jsonc` var) — a URL the integrator controls
+  (a relay that opens a GitHub issue / sends an email / posts to a channel).
+- `INTEGRATOR_ALERT_SECRET` (Cloudflare secret) — sent as `x-eh-sync-secret` so
+  the relay can reject anything else.
+
+The payload is **ids, outcomes and counts only** — `{ kind: "system_alert",
+ctUserId, reason, at }` or `{ kind: "health", ok, d1, fieldMap, ops, at }` — and
+is passed through `src/redact.ts` regardless. Leave both blank to disable.
+
+---
+
+## Day-to-day operations
 
 ### Monitoring — `GET /health`
+
 | Field | Meaning | Watch for |
 |---|---|---|
 | `d1`, `fieldMap` | core config | anything other than `ok` |
-| `ops.queueBacklog` | sync jobs sent but not yet acked or dead-lettered | a number that only grows |
+| `ops.queueBacklog` | Sync jobs sent but not yet acked or dead-lettered | a number that only grows |
 | `ops.deadLettered` | jobs that exhausted their retries | anything `> 0` |
 | `ops.lastSweepOkAt` | ISO time the approval sweep last completed cleanly | more than a few minutes stale |
 
-Full request/queue/sweep detail is in Workers observability logs (one JSON line
-per event; every line is passed through `src/redact.ts` first).
+Full request / queue / sweep detail is in the Cloudflare **Workers Logs** for the
+Worker — one JSON line per event, every line passed through `src/redact.ts` first.
 
 ### The three message types — who acts
+
 | Message | Recipient | Action |
 |---|---|---|
-| **Correction message** | the employee (DM); + direct manager on the 3rd failed attempt | the employee fixes the named field(s) in Connecteam; the next edit re-syncs automatically |
-| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand (foreign/WHM tax scale, add SMSF, enter overseas address) |
-| **System alert** | alerts channel | check EH API status / credentials; replay the dead-lettered job once the cause is fixed |
+| **Correction message** | the employee (DM); + Direct manager on the 3rd failed attempt in a row | the employee fixes the named field(s) in Connecteam; **their next profile edit re-syncs** (see below) |
+| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** |
+| **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job |
+
+### Re-syncing an employee
+A resync is triggered by a **profile edit** in Connecteam (the `user_updated`
+webhook, step 6) or by an onboarding pack reaching `completed` for the **first**
+time (the sweep). It is **not** reliably triggered by un-approving and
+re-approving a pack — the assignment does not dependably leave `status:
+completed`, and the sweep only enqueues on the transition *into* `completed`. So
+when a Correction message says "we'll sync again automatically", that depends on
+the employee **editing their profile** — which is why step 6's webhook is
+mandatory, not optional. To force a resync for an employee whose profile hasn't
+changed, edit any field on their Connecteam profile (an identical re-save is
+deduplicated and does nothing).
 
 ### Replaying a dead-lettered job
-A job on `eh-webhook-dlq` has already raised a System alert. After fixing the
-cause, re-drive it with `wrangler queues` (or re-trigger the source edit in
-Connecteam). Nothing auto-retries a dead-lettered job.
+A message on `eh-webhook-dlq` has already raised a System alert. After fixing the
+cause, re-drive it with `wrangler queues`, or re-trigger the source edit in
+Connecteam (edit the profile; first-time pack approval). Nothing auto-retries a
+dead-lettered job.
 
 ### Rotating keys
-`wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` with the new
-value, then rotate the far side. `CT_WEBHOOK_SECRET` must be changed on the
+`npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` with the
+new value, then rotate the far side. `CT_WEBHOOK_SECRET` must be updated on the
 Connecteam webhook registration at the same time.
+
+---
+
+## Updating the deployment
+
+```bash
+./scripts/update.sh
+```
+
+`git pull` → `npm ci` → `npm test` → `wrangler d1 migrations apply --remote` →
+`wrangler deploy` → `/health` check. Fails loudly on any step. Run by the client's
+IT, or by the integrator on a support call. A non-technical owner should not run
+this unaided.
 
 ---
 
@@ -240,3 +381,24 @@ member number — is ever written to D1 or to a log:
 | `sync_log` | userId, time, outcome, and a `detail` string of field **NAMES** + status only |
 | `sync_meta` | counters and a "last sweep ok" timestamp |
 | `console` logs | routed through `src/redact.ts`, which drops anything under a sensitive key |
+| integrator telemetry | ids, outcomes, counts only (see §9); redacted regardless |
+
+---
+
+## Appendix A — Porting to a non-Cloudflare host
+
+v1 is Cloudflare-only. The Worker binds directly to four Cloudflare primitives; a
+port replaces each:
+
+| Cloudflare primitive | Used for | Port target needs |
+|---|---|---|
+| **Workers** | the HTTP handler + `queue()` + `scheduled()` handlers | any serverless runtime with an HTTP entrypoint, a queue consumer hook, and a cron hook |
+| **D1** (SQLite) | `employee_map`, `onboarding_state`, `sync_log`, `sync_meta` | any SQL database; rewrite `src/db/store.ts` (drizzle) and the `migrations/` runner |
+| **Queues** | the Sync pipeline: retry, backoff, dead-letter → System alert | a managed queue (SQS, QStash, Pub/Sub) with a DLQ, or the "D1 job table drained by cron" pattern discussed during design |
+| **Cron Triggers** (`* * * * *`) | the 1-minute approval sweep | any 1-minute scheduler |
+
+`src/sync/consumer.ts` (`runSyncJob`, `handleDeadLetter`), `src/sync/*`,
+`src/mapping/*`, `src/eh/*`, `src/connecteam/*` and `src/webhook/*` are
+platform-agnostic and carry over unchanged — only `src/index.ts`, `src/db/store.ts`,
+`wrangler.jsonc` and the test harness are Cloudflare-shaped. Estimate a
+multi-week effort; there is no client demand for it yet.

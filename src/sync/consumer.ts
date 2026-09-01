@@ -21,6 +21,7 @@ import {
   managerEscalationMessage,
   followUpNoticeMessage,
   systemAlertMessage,
+  type PersonRef,
 } from "./messages.js";
 import { advanceCycle, directManagerUserId } from "./cycles.js";
 import { payloadHash } from "./canonical.js";
@@ -71,9 +72,14 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   const mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap);
   const hash = await payloadHash(mapped.payload);
 
-  // Unchanged since the last clean sync (hash is only stored after ok/follow_up).
-  if (link?.lastPayloadHash && link.lastPayloadHash === hash && link.ehEmployeeId) {
-    return { status: "skipped", reason: "unchanged since last sync" };
+  // Identical to the state we last processed. Connecteam fires one webhook per
+  // changed field, so a multi-field edit is a burst of deliveries that all
+  // resolve to the same mapped payload; run it once. This also stops an
+  // employee stuck in a correction loop from being re-messaged (and their
+  // failure cycle re-bumped) once per delivery in the burst. `lastPayloadHash`
+  // is now stored on every terminal outcome, not only clean ones.
+  if (link?.lastPayloadHash && link.lastPayloadHash === hash) {
+    return { status: "skipped", reason: "identical to the last processed state" };
   }
 
   let ehEmployeeId = link?.ehEmployeeId ?? undefined;
@@ -109,29 +115,33 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
 
   const cycle = await advanceCycle(deps.store, ctUserId, decision);
 
+  const person = { ctUserId, firstName: user.firstName, lastName: user.lastName };
+
   let managerNotified = false;
   if (decision.kind === "correction") {
     await deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields));
     if (cycle.action === "correction" && cycle.notifyManager) {
       const managerId = directManagerUserId(user.customFields);
       if (managerId !== null) {
-        await deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields));
+        await deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields, person));
         managerNotified = true;
       }
     }
   } else if (decision.kind === "follow_up") {
     await deps.ct.sendChannelMessage(
       deps.adminChannelId,
-      followUpNoticeMessage(decision.reasons, { ctUserId }),
+      followUpNoticeMessage(decision.reasons, person),
     );
   }
 
-  const clean = decision.kind === "ok" || decision.kind === "follow_up";
+  // Store the hash on every terminal outcome so an identical re-delivery is
+  // skipped above. A genuine later edit changes the mapped payload -> new hash
+  // -> it is processed again.
   await deps.store.saveEmployeeLink({
     ctUserId,
     ehEmployeeId: ehEmployeeId ?? null,
     lastSyncedTs: eventTimestamp,
-    lastPayloadHash: clean ? hash : null,
+    lastPayloadHash: hash,
   });
   await deps.store.appendSyncLog({
     ctUserId,
@@ -183,8 +193,25 @@ export async function dispatchBatch(
     return;
   }
 
-  let acked = 0;
+  // Connecteam fires one `user_updated` delivery per changed field, so a single
+  // profile edit arrives as a burst of jobs for the same user in one batch.
+  // Run only the newest per user; ack the rest untouched so they don't each
+  // trigger a sync, a message and a failure-cycle bump. (A burst split across
+  // batches is still deduped by the stale-event guard in runSyncJob once the
+  // first job has written `lastSyncedTs`.)
+  const newestPerUser = new Map<number, QueueMessageLike<SyncJob>>();
   for (const message of batch.messages) {
+    const prev = newestPerUser.get(message.body.ctUserId);
+    if (!prev || message.body.eventTimestamp > prev.body.eventTimestamp) {
+      if (prev) prev.ack();
+      newestPerUser.set(message.body.ctUserId, message);
+    } else {
+      message.ack();
+    }
+  }
+
+  let acked = 0;
+  for (const message of newestPerUser.values()) {
     try {
       const outcome = await runSyncJob(message.body, deps);
       if (outcome.status === "retry") message.retry();
@@ -210,10 +237,20 @@ export async function handleDeadLetter(
 ): Promise<void> {
   const now = deps.now ?? Date.now;
   const detail = `the sync exceeded its retry limit (trigger "${job.reason}")`;
-  await deps.ct.sendChannelMessage(
-    deps.adminChannelId,
-    systemAlertMessage(detail, { ctUserId: job.ctUserId }),
-  );
+
+  // Best effort: put the employee's name in the alert. The sync is already
+  // failing, so a failed lookup just falls back to the id.
+  let person: PersonRef = { ctUserId: job.ctUserId };
+  try {
+    const res = await deps.ct.getUser(job.ctUserId);
+    if (res.outcome === "ok" && res.data) {
+      person = { ctUserId: job.ctUserId, firstName: res.data.firstName, lastName: res.data.lastName };
+    }
+  } catch {
+    // keep the id-only ref
+  }
+
+  await deps.ct.sendChannelMessage(deps.adminChannelId, systemAlertMessage(detail, person));
   await deps.store.appendSyncLog({
     ctUserId: job.ctUserId,
     at: now(),
