@@ -221,6 +221,17 @@ put_secret() {
     || warn "could not set secret $1 - run: printf %%s '<value>' | npx wrangler secret put $1"
 }
 
+# health_num KEY: print the deployed Worker's /health ops.KEY as an integer
+# (0 if the field is absent or /health is unreachable). Needs $WORKER_URL.
+health_num() {
+  curl -fsS "${WORKER_URL}/health" 2>/dev/null | node -e '
+    const key = process.argv[1];
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try { process.stdout.write(String(Number((JSON.parse(s).ops || {})[key] || 0))); }
+      catch (e) { process.stdout.write("0"); }
+    });' "$1" 2>/dev/null || printf '0'
+}
+
 # ── prerequisites (before the banner, so a missing tool fails fast) ───────
 for _c in node npm npx git curl; do
   command -v "$_c" >/dev/null 2>&1 || { printf 'missing required tool: %s\n' "$_c" >&2; exit 1; }
@@ -371,9 +382,70 @@ else
   warn "no deployed URL captured - register the webhook by hand once the Worker is live (docs/RUNBOOK.md step 6)."
   SKIPPED+=("Connecteam webhook registration (no Worker URL was captured)")
 fi
-step "Edit a test user's profile and confirm their Employment Hero record updates."
-say "The first real delivery was used to confirm the signature scheme in"
-say "src/connecteam/signature.ts (header x-webhook-secret, no HMAC) during #22."
+
+# Show the webhook exactly as Connecteam now has it, so a wrong URL or a
+# disabled toggle is visible here rather than a mystery later.
+say ""
+say "Connecteam's registered webhooks for this account:"
+ct_api "/settings/v1/webhooks" | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    try {
+      const d = JSON.parse(s);
+      const list = d.data?.webhooks || d.data || d.webhooks || [];
+      if (!Array.isArray(list) || list.length === 0) {
+        console.log("   (none returned - inspect GET /settings/v1/webhooks by hand)"); return;
+      }
+      for (const w of list) {
+        const enabled = w.enabled ?? w.isEnabled ?? w.active ?? w.status ?? "?";
+        const events = (w.eventTypes || w.events || []).join(",") || "?";
+        console.log("   ", w.id || w.webhookId || "?", " ", w.url || w.targetUrl || "?", " events:", events, " enabled:", enabled);
+      }
+    } catch (e) { console.log("   (could not parse the webhook list)"); }
+  })'
+
+# Close the loop: prove Connecteam is actually delivering to the Worker now,
+# instead of finding out later. /health counts accepted (202) and rejected
+# (401) user_updated deliveries.
+if [[ -n "${WORKER_URL:-}" ]] && confirm "Do a live delivery check now (edit a test profile while the wizard watches)?"; then
+  before=$(health_num webhookAccepted)
+  rej_before=$(health_num webhookRejected)
+  if [[ ! "$before" =~ ^[0-9]+$ || ! "$rej_before" =~ ^[0-9]+$ ]]; then
+    warn "couldn't read $WORKER_URL/health to baseline the check - skipping."
+    warn "verify by hand: edit a test profile, then re-check $WORKER_URL/health (ops.webhookAccepted)."
+    SKIPPED+=("Confirm the first webhook delivery (docs/RUNBOOK.md 'Verify')")
+  else
+    say ""
+    step "Now edit ANY mapped field on a TEST user's Connecteam profile and save it."
+    printf '  %swaiting up to 90s for the delivery%s ' "$DIM" "$RESET"
+    result="" ; waited=0
+    while (( waited < 90 )); do
+      sleep 5 ; waited=$(( waited + 5 )) ; printf '.'
+      if (( $(health_num webhookAccepted) > before ));     then result="ok";       break; fi
+      if (( $(health_num webhookRejected) > rej_before )); then result="rejected"; break; fi
+    done
+    printf '\n'
+    case "$result" in
+      ok)
+        printf '  %s✓ the Worker accepted a profile update from Connecteam (202)%s\n' "$GREEN" "$RESET"
+        say "The webhook path is live." ;;
+      rejected)
+        warn "a delivery ARRIVED but was rejected (401): the secretKey Connecteam sends"
+        warn "does not match CT_WEBHOOK_SECRET. Delete the webhook in Connecteam and"
+        warn "re-run this stage to re-register it with the current secret."
+        SKIPPED+=("Webhook secret mismatch - re-register the Connecteam webhook (docs/RUNBOOK.md step 6)") ;;
+      *)
+        warn "no delivery seen in 90s. Usual causes:"
+        note "  - the registered URL is not exactly $WEBHOOK_TARGET"
+        note "  - the webhook shows enabled:false above (toggle it on in Connecteam)"
+        note "  - the edited field isn't mapped, or it was the admin-only side of the pack"
+        say  "See raw deliveries with:  npx wrangler tail --format pretty   then edit a profile again."
+        SKIPPED+=("Confirm the first webhook delivery (docs/RUNBOOK.md 'Verify')") ;;
+    esac
+  fi
+fi
+say ""
+say "The signature scheme (header x-webhook-secret, no HMAC) was confirmed in"
+say "src/connecteam/signature.ts during #22."
 
 finish
 say "Next: approve a test onboarding pack and watch the employee appear in Employment Hero within ~1 minute."

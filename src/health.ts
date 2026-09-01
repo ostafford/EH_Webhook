@@ -33,6 +33,10 @@ export interface Health {
     deadLettered: number;
     /** ISO time the approval sweep last completed without error, or null. */
     lastSweepOkAt: string | null;
+    /** `user_updated` deliveries accepted (202): Connecteam is delivering and the signature verifies. */
+    webhookAccepted: number;
+    /** `user_updated` deliveries rejected (401): a delivery arrived but its secretKey did not match. */
+    webhookRejected: number;
   } | null;
 }
 
@@ -80,6 +84,8 @@ async function readOps(env: HealthEnv): Promise<Health["ops"]> {
       queueBacklog: Math.max(0, enqueued - acked - deadLettered),
       deadLettered,
       lastSweepOkAt: sweepAt > 0 ? new Date(sweepAt).toISOString() : null,
+      webhookAccepted: m.get("webhook_202_total") ?? 0,
+      webhookRejected: m.get("webhook_401_total") ?? 0,
     };
   } catch {
     return null;
