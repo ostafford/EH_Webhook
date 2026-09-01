@@ -25,6 +25,64 @@ describe("parseFieldMap", () => {
   it("rejects unknown top-level keys", () => {
     expect(() => parseFieldMap({ ...map, surprise: true })).toThrow(/Invalid field-map/);
   });
+
+  it("accepts an optional employmentHero.defaults block (issue #26)", () => {
+    const withDefaults = {
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: { awardId: "12345", classification: "Level 2", standardHoursPerWeek: 38 },
+      },
+    };
+    expect(parseFieldMap(withDefaults).employmentHero.defaults).toEqual({
+      awardId: "12345",
+      classification: "Level 2",
+      standardHoursPerWeek: 38,
+    });
+  });
+
+  it("rejects an unknown key inside employmentHero.defaults", () => {
+    const bad = {
+      ...map,
+      employmentHero: { ...map.employmentHero, defaults: { annualSalary: 90000 } },
+    };
+    expect(() => parseFieldMap(bad)).toThrow(/employmentHero\.defaults/);
+  });
+});
+
+describe("applyFieldMap - employmentHero.defaults (issue #26)", () => {
+  it("does nothing when the block is absent", () => {
+    const { payload } = applyFieldMap(clone(), map);
+    expect(payload.awardId).toBeUndefined();
+    expect(payload.classification).toBeUndefined();
+  });
+
+  it("stamps each present default onto the payload, like payScheduleId", () => {
+    const withDefaults = parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: { awardId: 12345, classification: "Level 2", payCategoryId: "67890", standardHoursPerWeek: 38 },
+      },
+    });
+    const { payload, issues } = applyFieldMap(clone(), withDefaults);
+    expect(issues).toEqual([]);
+    expect(payload.awardId).toBe(12345);
+    expect(payload.classification).toBe("Level 2");
+    expect(payload.payCategoryId).toBe("67890");
+    expect(payload.standardHoursPerWeek).toBe(38);
+  });
+
+  it("omits a default that is not set", () => {
+    const withOne = parseFieldMap({
+      ...map,
+      employmentHero: { ...map.employmentHero, defaults: { awardId: "A1" } },
+    });
+    const { payload } = applyFieldMap(clone(), withOne);
+    expect(payload.awardId).toBe("A1");
+    expect(payload.standardHoursPerWeek).toBeUndefined();
+    expect(payload.classification).toBeUndefined();
+  });
 });
 
 describe("applyFieldMap - happy path", () => {

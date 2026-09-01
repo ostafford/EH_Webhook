@@ -45,7 +45,11 @@ then run the wizard.
   payroll admin — the sync never sets them. Until an admin does, EH reports the
   new record as **`Incomplete`** and the sync raises a **Manual-follow-up
   notice** to the alerts channel (it is *not* sent to the employee as a
-  Correction). See [Verify & go live](#7-verify--go-live).
+  Correction). See [Verify & go live](#7-verify--go-live). If the whole company
+  shares one or a few classifications, the opt-in `employmentHero.defaults`
+  block can stamp award / classification / standard hours on every record — see
+  [`eh-pay-defaults.md`](./eh-pay-defaults.md) (verify against a test business
+  first with `scripts/probe-eh-pay-defaults.sh`).
 - Onboarding-pack approval is a real step (the initial Sync fires when a pack
   first reaches `status: completed`). **Re-approving** a pack is *not* a reliable
   way to force a resync — see [Operations](#re-syncing-an-employee).

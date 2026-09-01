@@ -81,6 +81,23 @@ export const fieldMap = z
         businessId: z.string().min(1),
         payScheduleId: z.string().min(1),
         locationId: z.string().min(1),
+        /**
+         * Company-wide pay-run defaults, stamped on every payload the same way
+         * as `payScheduleId` (issue #26). Fully opt-in: omit the block and
+         * nothing changes. `awardId` is confirmed on EH's unstructured employee
+         * model; the other three are best-known names pending
+         * `scripts/probe-eh-pay-defaults.sh` - read `docs/eh-pay-defaults.md`
+         * before setting them.
+         */
+        defaults: z
+          .object({
+            awardId: z.union([z.string().min(1), z.number()]).optional(),
+            classification: z.string().min(1).optional(),
+            payCategoryId: z.union([z.string().min(1), z.number()]).optional(),
+            standardHoursPerWeek: z.number().positive().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     identity: z

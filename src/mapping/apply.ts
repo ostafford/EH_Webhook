@@ -114,6 +114,34 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
   return { payload, issues };
 }
 
+/**
+ * EH unstructured-employee field name for each company-wide pay-run default
+ * (issue #26). `awardId` is a confirmed writable property of
+ * AuUnstructuredEmployeeModel. `classification`, `payCategoryId` and
+ * `standardHoursPerWeek` are the best-known names but are NOT yet confirmed to
+ * be honoured on the unstructured endpoint - run
+ * `scripts/probe-eh-pay-defaults.sh` against a test business and adjust here if
+ * a name is wrong (see `docs/eh-pay-defaults.md`).
+ */
+const PAY_DEFAULT_EH_FIELD: Record<string, string> = {
+  awardId: "awardId",
+  classification: "classification",
+  payCategoryId: "payCategoryId",
+  standardHoursPerWeek: "standardHoursPerWeek",
+};
+
+/** Fold the opt-in `employmentHero.defaults` block into the payload verbatim. */
+function applyPayDefaults(
+  payload: Record<string, PayloadValue>,
+  defaults: FieldMap["employmentHero"]["defaults"],
+): void {
+  if (!defaults) return;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (value === undefined) continue;
+    payload[PAY_DEFAULT_EH_FIELD[key] ?? key] = value as PayloadValue;
+  }
+}
+
 function mergeRuleOutput(
   target: { payload: Record<string, PayloadValue>; issues: MappingIssue[]; followUps: string[] },
   r: RuleOutput,
@@ -140,6 +168,7 @@ export function applyFieldMap(user: ConnecteamUser, map: FieldMap): MappingResul
   // Structural values from the client config.
   acc.payload.payScheduleId = map.employmentHero.payScheduleId;
   acc.payload.locationId = map.employmentHero.locationId;
+  applyPayDefaults(acc.payload, map.employmentHero.defaults);
 
   const externalId = String(user.userId);
   acc.payload.externalId = externalId;
