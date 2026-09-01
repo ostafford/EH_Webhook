@@ -101,6 +101,7 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM employee_map"),
     env.DB.prepare("DELETE FROM sync_log"),
+    env.DB.prepare("DELETE FROM sync_meta"),
   ]);
 });
 
@@ -173,6 +174,30 @@ describe("queue consumer (in workerd, real D1)", () => {
       .bind(syntheticUser.userId)
       .first<{ failure_cycle_count: number }>();
     expect(row?.failure_cycle_count).toBe(1);
+  });
+
+  it("does not re-post a follow-up notice for a still-Incomplete record on a later edit (issue #27)", async () => {
+    const incomplete = { ehStatus: "Incomplete", ehDetailedStatus: "Pay Run Defaults are incomplete" };
+
+    const w1 = world(incomplete);
+    const out1 = await runSyncJob(job({ eventTimestamp: 1000 }), w1.deps);
+    expect(out1.status).toBe("follow_up");
+    expect(w1.sent.channels).toHaveLength(1);
+
+    // A genuine later edit: different mapped payload, same follow-up reason.
+    const edited = structuredClone(syntheticUser);
+    edited.customFields.find((f) => f.customFieldId === 42920715)!.value = "Brunswick";
+    const w2 = world({ ...incomplete, ctUser: edited });
+    const out2 = await runSyncJob(job({ eventTimestamp: 2000 }), w2.deps);
+
+    expect(out2.status).toBe("follow_up");
+    expect(out2.noticeSuppressed).toBe(true);
+    expect(w2.sent.channels).toHaveLength(0);
+
+    const audit = await env.DB.prepare("SELECT outcome FROM sync_log WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .all<{ outcome: string }>();
+    expect(audit.results.map((r) => r.outcome)).toEqual(["follow_up", "follow_up"]);
   });
 
   it("acks a good message and retries an outage through a real MessageBatch", async () => {

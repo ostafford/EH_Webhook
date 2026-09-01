@@ -27,6 +27,7 @@ function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
   rows: Map<number, EmployeeLink>;
   log: SyncLogEntry[];
   counters: Map<string, number>;
+  meta: Map<string, number>;
 } {
   const rows = new Map<number, EmployeeLink>();
   if (seed.ctUserId !== undefined) {
@@ -40,12 +41,20 @@ function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
   }
   const log: SyncLogEntry[] = [];
   const counters = new Map<string, number>();
+  const meta = new Map<string, number>();
   return {
     rows,
     log,
     counters,
+    meta,
     async bumpCounter(key: string, delta: number) {
       counters.set(key, (counters.get(key) ?? 0) + delta);
+    },
+    async readMeta(keys: string[]) {
+      return Object.fromEntries(keys.map((k) => [k, meta.get(k) ?? 0]));
+    },
+    async setMarker(key: string, value: number) {
+      meta.set(key, value);
     },
     async getEmployeeLink(id) {
       return rows.get(id) ?? null;
@@ -323,6 +332,85 @@ describe("runSyncJob - follow-up path", () => {
   });
 });
 
+describe("runSyncJob - follow-up notice de-dup (issue #27)", () => {
+  const makeNonResident = (u: ConnecteamUser): ConnecteamUser => {
+    u.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
+    u.customFields.find((f) => f.customFieldId === 42923276)!.value = [{ id: 1, value: "No" }];
+    return u;
+  };
+  // Clearing the USI (keeping the ABN) makes the super an SMSF -> a second,
+  // additive follow-up reason.
+  const alsoSmsf = (u: ConnecteamUser): ConnecteamUser => {
+    u.customFields.find((f) => f.customFieldId === 42920803)!.value = "";
+    return u;
+  };
+  const retitle = (u: ConnecteamUser): ConnecteamUser => {
+    u.customFields.find((f) => f.customFieldId === 25145108)!.value = "Senior Support Officer";
+    return u;
+  };
+
+  it("does not re-post the same follow-up reason while the record stays Incomplete", async () => {
+    const store = fakeGateway();
+    const eh = fakeEh({ id: 555 });
+
+    const first = fakeCt(makeNonResident(cloneUser()));
+    const out1 = await runSyncJob(job({ eventTimestamp: 1000 }), deps({ store, eh, ct: first as never }));
+    expect(out1.status).toBe("follow_up");
+    expect(first.channels).toHaveLength(1);
+
+    // A genuine later edit: different mapped payload, same follow-up reason.
+    const second = fakeCt(retitle(makeNonResident(cloneUser())));
+    const out2 = await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, eh, ct: second as never }));
+
+    expect(out2.status).toBe("follow_up");
+    expect(out2.noticeSuppressed).toBe(true);
+    expect(second.channels).toHaveLength(0);
+    // The audit trail still records both follow-ups.
+    expect(store.log.filter((l) => l.outcome === "follow_up")).toHaveLength(2);
+  });
+
+  it("re-posts when the follow-up reason-set actually changed", async () => {
+    const store = fakeGateway();
+    const eh = fakeEh({ id: 555 });
+
+    const first = fakeCt(makeNonResident(cloneUser()));
+    await runSyncJob(job({ eventTimestamp: 1000 }), deps({ store, eh, ct: first as never }));
+    expect(first.channels).toHaveLength(1);
+
+    // Second edit adds SMSF super on top of the non-resident reason.
+    const second = fakeCt(alsoSmsf(makeNonResident(cloneUser())));
+    const out2 = await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, eh, ct: second as never }));
+
+    expect(out2.status).toBe("follow_up");
+    expect(out2.noticeSuppressed).toBeFalsy();
+    expect(second.channels).toHaveLength(1);
+    expect(second.channels[0]!.text).toMatch(/self-managed super/i);
+  });
+
+  it("re-posts the same reason once the de-dup window has elapsed", async () => {
+    const store = fakeGateway();
+    const eh = fakeEh({ id: 555 });
+    let clock = 1_000_000;
+
+    const first = fakeCt(makeNonResident(cloneUser()));
+    await runSyncJob(
+      job({ eventTimestamp: 1000 }),
+      deps({ store, eh, ct: first as never, now: () => clock }),
+    );
+    expect(first.channels).toHaveLength(1);
+
+    clock += 13 * 60 * 60 * 1000; // past FOLLOW_UP_NOTICE_DEDUPE_MS (12h)
+    const second = fakeCt(retitle(makeNonResident(cloneUser())));
+    const out2 = await runSyncJob(
+      job({ eventTimestamp: 2000 }),
+      deps({ store, eh, ct: second as never, now: () => clock }),
+    );
+
+    expect(out2.noticeSuppressed).toBeFalsy();
+    expect(second.channels).toHaveLength(1);
+  });
+});
+
 describe("runSyncJob - read-back mismatch", () => {
   it("a non-sensitive field that did not persist triggers a correction", async () => {
     const ct = fakeCt(cloneUser());
@@ -491,5 +579,29 @@ describe("handleDeadLetter", () => {
     await expect(
       handleDeadLetter(job({ ctUserId: 8 }), { ct: ct as never, store, adminChannelId: "c", now: () => 1 }),
     ).resolves.toBeUndefined();
+  });
+
+  it("posts one channel alert per user within the window, but audits every dead-letter (issue #27)", async () => {
+    const ct = fakeCt(cloneUser());
+    const store = fakeGateway();
+    const base = { ct: ct as never, store, adminChannelId: "chan-1" };
+
+    await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 });
+    await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 60_000 });
+
+    expect(ct.channels).toHaveLength(1);
+    expect(store.log.filter((l) => l.outcome === "dead_letter")).toHaveLength(2);
+  });
+
+  it("still alerts a different user, and the same user after the window", async () => {
+    const ct = fakeCt(cloneUser());
+    const store = fakeGateway();
+    const base = { ct: ct as never, store, adminChannelId: "chan-1" };
+
+    await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 });
+    await handleDeadLetter(job({ ctUserId: 99 }), { ...base, now: () => 5 });
+    await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 + 61 * 60 * 1000 });
+
+    expect(ct.channels).toHaveLength(3);
   });
 });
