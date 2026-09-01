@@ -82,19 +82,24 @@ export const fieldMap = z
         payScheduleId: z.string().min(1),
         locationId: z.string().min(1),
         /**
-         * Company-wide pay-run defaults, stamped on every payload the same way
-         * as `payScheduleId` (issue #26). Fully opt-in: omit the block and
-         * nothing changes. `awardId` is confirmed on EH's unstructured employee
-         * model; the other three are best-known names pending
-         * `scripts/probe-eh-pay-defaults.sh` - read `docs/eh-pay-defaults.md`
-         * before setting them.
+         * Company-wide pay-run defaults, stamped on every payload beside the
+         * structural values (issue #26). Fully opt-in: omit the block and
+         * nothing changes. Field names verified against the live unstructured
+         * endpoint (`docs/eh-pay-defaults.md`): EH takes the pay category /
+         * award by NAME, and validates the pay-run set all-or-nothing - a
+         * partial set is a 400, so set every field or none.
          */
         defaults: z
           .object({
+            /** Award name/id (validated against the business). */
             awardId: z.union([z.string().min(1), z.number()]).optional(),
-            classification: z.string().min(1).optional(),
-            payCategoryId: z.union([z.string().min(1), z.number()]).optional(),
-            standardHoursPerWeek: z.number().positive().optional(),
+            /** Primary pay category, by NAME (e.g. "Permanent Ordinary Hours"). */
+            primaryPayCategory: z.string().min(1).optional(),
+            rate: z.number().nonnegative().optional(),
+            /** e.g. "Hourly", "Annually". */
+            rateUnit: z.string().min(1).optional(),
+            hoursPerWeek: z.number().positive().optional(),
+            hoursPerDay: z.number().positive().optional(),
           })
           .strict()
           .optional(),

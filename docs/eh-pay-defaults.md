@@ -4,92 +4,70 @@
 
 Every synced employee lands in Employment Hero as
 `status: Incomplete — "Pay Run Defaults are incomplete"` because the sync never
-sets award / classification / pay category / standard hours (out of scope for
-v1, `docs/PLAN.md`). A payroll admin fixes each record by hand, and a
-Manual-follow-up notice fires per employee.
+sets award / pay category / rate / standard hours (out of scope for v1). A
+payroll admin fixes each record by hand and a Manual-follow-up notice fires per
+employee. Most of that data is **company-wide**, not per-person.
 
-Most of that data is **company-wide**, not per-person — the same category as
-`payScheduleId` / `locationId`, which the sync already stamps on every payload
-from `clients/self/field-map.json`. So: an opt-in `employmentHero.defaults`
-block, applied on every create through the same code path.
+## Probe results — against EH test business `555455`
 
-```jsonc
-"employmentHero": {
-  "businessId": "…",
-  "payScheduleId": "…",
-  "locationId": "…",
-  "defaults": {
-    "awardId": "12345",
-    "classification": "Level 2",
-    "payCategoryId": "67890",
-    "standardHoursPerWeek": 38
-  }
-}
-```
+Run with `scripts/probe-eh-pay-defaults.sh` (creates and deletes one `ZZZTEST-`
+employee, never touches a pay run). The business is bare: no awards, no pay-rate
+templates, one pay schedule (`Weekly` / `32407`), one location (`Connecteam` /
+`436590`), 50 system pay categories.
 
-Individual **salary** is a real per-person number — it stays a Connecteam custom
-field or a manual EH entry, and the follow-up notice keeps covering it.
+| Sent on `POST .../employee/unstructured` | Result |
+|---|---|
+| minimal create, no pay fields | `201`, `status: Incomplete` ("Basic Details…") — baseline |
+| `payScheduleId:"32407"`, `locationId:"436590"` *(exactly what `apply.ts` sends today)* | `201`, but `paySchedule` / `primaryLocation` **read back `null`** — **these keys are silently ignored** |
+| any single pay-run field (`hoursPerWeek`, `rate`, …) | `400` "Error validating pay run settings" — EH then demands the **whole set**: Default Pay Cycle Id, Primary Location Id, Default Pay Category Id, Rate, Rate Unit |
+| `paySchedule:"Weekly"`, `primaryLocation:"Connecteam"`, `primaryPayCategory:"Permanent Ordinary Hours"`, `rate:30`, `rateUnit:"Hourly"`, `hoursPerWeek:38`, `hoursPerDay:7.6` — **all by name** | `201`, **all seven persisted on read-back** (status stays `Incomplete` only because this synthetic employee has no bank / super / full tax details — the pay-run axis is now satisfied) |
+| `classification:"Level 2"` | **silently dropped** — not a recognised key; doesn't even trigger pay-run validation |
+| `standardHoursPerWeek:40` | **silently dropped** — the real fields are `hoursPerWeek` / `hoursPerDay` |
+| `awardId:0` | `400` "Award 0 not found for the business" — `awardId` **is** a validated input field (needs a real award id; this business has none to test) |
 
-## Must verify first — is the unstructured endpoint enough?
+### Conclusions
 
-`POST /api/v2/business/{id}/employee/unstructured` (`AuUnstructuredEmployeeModel`)
-is the only write path this integration uses. Some pay-setup data lives on
-*structured* endpoints instead, so each default field has to be confirmed.
+1. **The unstructured endpoint _does_ accept pay-run defaults** — by **name**, and
+   as an all-or-nothing set: `paySchedule`, `primaryLocation`,
+   `primaryPayCategory`, `rate`, `rateUnit`, `hoursPerWeek`, `hoursPerDay`, plus
+   `awardId` (numeric id, validated against the business).
+2. **A partial set is a `400`.** The field-map `defaults` block therefore has to
+   carry the whole set to move a record off `Incomplete` on the pay-run axis.
+3. **`classification` / `payCategoryId` / `standardHoursPerWeek`** (this doc's
+   first draft) are **not** accepted here. Use `primaryPayCategory` (name) and
+   `hoursPerWeek` / `hoursPerDay`.
+4. **`rate` is genuinely per-person** for most workforces — a single company-wide
+   `rate` only fits a flat-rate team. So `defaults` is realistically "flip to
+   Complete for a single-rate workforce"; anything with real pay bands still
+   needs per-employee entry (Connecteam custom field or manual EH).
 
-What is known from the API reference so far:
+## Pre-existing bug found by the probe (NOT #26)
 
-| Field | On `AuUnstructuredEmployeeModel`? | Notes |
-|---|---|---|
-| `awardId` | **Yes** — confirmed writable property (`int32`) | |
-| `classification` | Unconfirmed | classification appears on award / pay-rate-template models; may or may not be honoured here |
-| `payCategoryId` | Unconfirmed / unlikely | pay category is normally per-earnings-line, not an employee default |
-| `standardHoursPerWeek` | Unconfirmed | `standardWeeklyHours` exists on the employment-agreement / pay-rate-template model; the employee-level name and endpoint need checking |
+`src/mapping/apply.ts` sets `payScheduleId` and `locationId` on every payload
+from `clients/self/field-map.json`. **EH's unstructured endpoint ignores those
+key names** — the live test employee `14246310` has `paySchedule: null`,
+`primaryLocation: null` despite the sync. The correct input keys are
+`paySchedule` and `primaryLocation`, **by name**. Fixing it means the field-map
+carries names (`"Weekly"`, `"Connecteam"`) instead of ids. Tracked separately —
+see the issue raised from this probe.
 
-Sources: KeyPay API reference — [`AuUnstructuredEmployeeModel`](https://api.keypay.com.au/australia/resources/auunstructuredemployeemodel?v=latest),
-[Create or Update Employee](https://api.keypay.com.au/australia/reference/employee/au-employee--post-employee),
-[`EmploymentAgreementModel`](https://api.keypay.com/australia/resources/employmentagreementmodel?v=latest).
+## What this PR ships
 
-### Run the probe
-
-Against a **test** business (never production; the probe creates and deletes one
-`ZZZTEST-` employee and never touches a pay run):
-
-```bash
-# EH_API_KEY / EH_BUSINESS_ID from env or .dev.vars
-scripts/probe-eh-pay-defaults.sh --award 12345 --classification "Level 2" \
-    --pay-category 67890 --hours 38
-```
-
-It creates the employee with those fields, reads the record back, prints which
-fields persisted plus `status` / `detailedStatus`, then deletes it. Read the
-output as:
-
-- **✓ on read-back and `status` moved toward `Complete`** → safe to put in
-  `employmentHero.defaults`; the `PAY_DEFAULT_EH_FIELD` map in
-  `src/mapping/apply.ts` already carries the name.
-- **✗ on read-back, or a `400` on create naming the field** → not honoured on
-  this endpoint. Leave it out (the follow-up notice still covers it), or add a
-  structured call in a follow-up issue. Fix the name in `PAY_DEFAULT_EH_FIELD`
-  if the probe shows a different one works.
-
-Record the outcome in the table above.
-
-## What ships now
-
-- `field-map.json` schema accepts the optional `employmentHero.defaults` block
-  (`src/mapping/schema.ts`).
-- `applyFieldMap` folds every present default into the payload verbatim, keyed
-  through `PAY_DEFAULT_EH_FIELD`, right beside `payScheduleId` / `locationId`
-  (`src/mapping/apply.ts`).
-- `scripts/probe-eh-pay-defaults.sh` for the verification above.
-- The example and `self` field-maps do **not** set the block — it is entirely
-  opt-in, so an unverified field name cannot affect an existing deployment.
+- `field-map.json` schema accepts an opt-in `employmentHero.defaults` block with
+  the **verified** field names:
+  `{ awardId?, primaryPayCategory?, rate?, rateUnit?, hoursPerWeek?, hoursPerDay? }`.
+- `applyFieldMap` folds every present default into the payload verbatim, beside
+  the structural values.
+- `scripts/probe-eh-pay-defaults.sh` — the probe above, re-runnable against any
+  test business.
+- Opt-in only: `_example` / `self` don't set the block, so it can't change an
+  existing deployment.
 
 ## Not doing (yet)
 
-- **Sourcing the values from Connecteam's "Customizable defaults"** (Company
-  Policies). Only worth the extra API wiring if a client needs non-technical
-  self-serve; the field-map is the simpler surface for a set-once-at-setup value.
-- **Per-employee salary.** Stays manual / a Connecteam custom field.
-- **Structured-endpoint calls** for any default the probe shows the unstructured
-  endpoint rejects.
+- **Auto-flip to Complete.** `defaults` only helps a single-rate workforce, and
+  even then only once the `paySchedule` / `primaryLocation` bug above is fixed so
+  the *whole* pay-run set actually lands.
+- **Sourcing values from Connecteam "Customizable defaults".**
+- **`classification` / award classification** — needs a business with awards to
+  probe, and likely a `payRateTemplate` rather than a bare field.

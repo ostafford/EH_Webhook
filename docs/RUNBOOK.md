@@ -46,10 +46,10 @@ then run the wizard.
   new record as **`Incomplete`** and the sync raises a **Manual-follow-up
   notice** to the alerts channel (it is *not* sent to the employee as a
   Correction). See [Verify & go live](#7-verify--go-live). If the whole company
-  shares one or a few classifications, the opt-in `employmentHero.defaults`
-  block can stamp award / classification / standard hours on every record — see
-  [`eh-pay-defaults.md`](./eh-pay-defaults.md) (verify against a test business
-  first with `scripts/probe-eh-pay-defaults.sh`).
+  is on **one flat pay rate**, the opt-in `employmentHero.defaults` block can
+  stamp pay category / rate / rate unit / standard hours (and award) on every
+  record — probe results and the exact field names are in
+  [`eh-pay-defaults.md`](./eh-pay-defaults.md).
 - Onboarding-pack approval is a real step (the initial Sync fires when a pack
   first reaches `status: completed`). **Re-approving** a pack is *not* a reliable
   way to force a resync — see [Operations](#re-syncing-an-employee).
