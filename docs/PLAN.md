@@ -232,6 +232,10 @@ _Rough total: ~3 working weeks for one engineer._
 - Real EH `422` body shape → seeds the curated error map (M2). **Resolved (#22):**
   EH returns HTTP `400` `{ "message": "..." }`; messages come both as
   `Field: reason` and as bare prose (`"Tax File Number is invalid"`).
+  **Extended (#29):** `parseValidationBody` maps the known colon-less phrases
+  (TFN, tax-free threshold, bank / super allocation) back to an EH field name;
+  add new phrases to `COLONLESS_REASON_FIELDS` in `src/eh/errors.ts` as they
+  appear in `sync_log`.
 - Connecteam webhook signature algorithm (`secretKey`) — header + digest (M3).
   **Resolved (#22):** no HMAC. `webhookVersion: 1` sends the `secretKey` verbatim
   in the `x-webhook-secret` header. `secretKey` is settable via the API only.
