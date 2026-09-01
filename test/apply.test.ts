@@ -26,16 +26,22 @@ describe("parseFieldMap", () => {
     expect(() => parseFieldMap({ ...map, surprise: true })).toThrow(/Invalid field-map/);
   });
 
-  it("accepts an optional employmentHero.defaults block (issue #26)", () => {
+  it("accepts an optional employmentHero.defaults block (issues #26, #34)", () => {
     const withDefaults = {
       ...map,
       employmentHero: {
         ...map.employmentHero,
-        defaults: { awardId: "12345", primaryPayCategory: "Permanent Ordinary Hours", hoursPerWeek: 38 },
+        defaults: {
+          paySchedule: "Weekly",
+          primaryLocation: "Head Office",
+          primaryPayCategory: "Permanent Ordinary Hours",
+          hoursPerWeek: 38,
+        },
       },
     };
     expect(parseFieldMap(withDefaults).employmentHero.defaults).toEqual({
-      awardId: "12345",
+      paySchedule: "Weekly",
+      primaryLocation: "Head Office",
       primaryPayCategory: "Permanent Ordinary Hours",
       hoursPerWeek: 38,
     });
@@ -50,36 +56,44 @@ describe("parseFieldMap", () => {
   });
 });
 
-describe("applyFieldMap - employmentHero.defaults (issue #26)", () => {
-  it("does nothing when the block is absent", () => {
+describe("applyFieldMap - employmentHero.defaults (issues #26, #34)", () => {
+  it("does nothing when the block is absent - no pay-run keys at all", () => {
     const { payload } = applyFieldMap(clone(), map);
-    expect(payload.awardId).toBeUndefined();
-    expect(payload.primaryPayCategory).toBeUndefined();
+    for (const k of ["paySchedule", "primaryLocation", "payScheduleId", "locationId", "primaryPayCategory", "rate", "awardId"]) {
+      expect(payload[k as keyof typeof payload]).toBeUndefined();
+    }
   });
 
-  it("stamps each present default onto the payload verbatim", () => {
+  it("stamps the complete pay-run set onto the payload verbatim, by name", () => {
     const withDefaults = parseFieldMap({
       ...map,
       employmentHero: {
         ...map.employmentHero,
         defaults: {
-          awardId: 12345,
+          paySchedule: "Weekly",
+          primaryLocation: "Head Office",
           primaryPayCategory: "Permanent Ordinary Hours",
           rate: 30,
           rateUnit: "Hourly",
           hoursPerWeek: 38,
           hoursPerDay: 7.6,
+          awardId: 12345,
         },
       },
     });
     const { payload, issues } = applyFieldMap(clone(), withDefaults);
     expect(issues).toEqual([]);
-    expect(payload.awardId).toBe(12345);
+    expect(payload.paySchedule).toBe("Weekly");
+    expect(payload.primaryLocation).toBe("Head Office");
     expect(payload.primaryPayCategory).toBe("Permanent Ordinary Hours");
     expect(payload.rate).toBe(30);
     expect(payload.rateUnit).toBe("Hourly");
     expect(payload.hoursPerWeek).toBe(38);
     expect(payload.hoursPerDay).toBe(7.6);
+    expect(payload.awardId).toBe(12345);
+    // never the legacy keys EH ignores
+    expect(payload.payScheduleId).toBeUndefined();
+    expect(payload.locationId).toBeUndefined();
   });
 
   it("omits a default that is not set", () => {
@@ -146,11 +160,13 @@ describe("applyFieldMap - happy path", () => {
     expect(payload.superFund1_AllocatedPercentage).toBe(100);
   });
 
-  it("folds in constants and the structural config", () => {
+  it("folds in constants and the external id", () => {
     expect(payload.bankAccount1_AllocatedPercentage).toBe(100);
-    expect(payload.payScheduleId).toBe("32407");
-    expect(payload.locationId).toBe("436590");
     expect(payload.externalId).toBe("17760356");
+  });
+  it("does NOT emit the legacy payScheduleId / locationId keys (issue #34)", () => {
+    expect(payload.payScheduleId).toBeUndefined();
+    expect(payload.locationId).toBeUndefined();
   });
   it("keeps leading zeros on BSB and account number, strips separators from TFN", () => {
     expect(payload.taxFileNumber).toBe("123456782");

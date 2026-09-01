@@ -29,13 +29,13 @@ const throwaway = parseFieldMap({
 const clone = (): ConnecteamUser => structuredClone(syntheticUser);
 
 describe("a second throwaway client configuration", () => {
-  it("drives applyFieldMap with its own structural ids, not the example's", () => {
+  it("drives applyFieldMap with its own field ids, not the example's", () => {
     const { payload, issues } = applyFieldMap(clone(), throwaway);
     expect(issues).toEqual([]);
-    expect(payload.payScheduleId).toBe("77777");
-    expect(payload.locationId).toBe("88888");
     expect(payload.firstName).toBe("Samuel");
     expect(payload.externalId).toBe("17760356");
+    // payScheduleId / locationId are config-only now, never in the payload (#34)
+    expect(payload.payScheduleId).toBeUndefined();
   });
 
   it("the example map still loads unchanged alongside it", async () => {

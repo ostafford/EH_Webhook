@@ -47,9 +47,10 @@ then run the wizard.
   notice** to the alerts channel (it is *not* sent to the employee as a
   Correction). See [Verify & go live](#7-verify--go-live). If the whole company
   is on **one flat pay rate**, the opt-in `employmentHero.defaults` block can
-  stamp pay category / rate / rate unit / standard hours (and award) on every
-  record — probe results and the exact field names are in
-  [`eh-pay-defaults.md`](./eh-pay-defaults.md).
+  stamp the complete pay-run set — pay schedule, primary location, pay category,
+  rate, rate unit (plus optional hours / award), all **by name** — on every
+  record; EH rejects a partial set, so it's all or nothing. Field names and
+  probe results are in [`eh-pay-defaults.md`](./eh-pay-defaults.md).
 - Onboarding-pack approval is a real step (the initial Sync fires when a pack
   first reaches `status: completed`). **Re-approving** a pack is *not* a reliable
   way to force a resync — see [Operations](#re-syncing-an-employee).

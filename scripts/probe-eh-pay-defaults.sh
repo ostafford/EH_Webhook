@@ -89,8 +89,8 @@ probe() {
 echo "probing business $BUSINESS_ID"
 echo
 
-# 1. baseline: does the CURRENT sync's payScheduleId/locationId even land?
-probe "baseline: payScheduleId + locationId as the sync sends them today" \
+# 1. the legacy keys the sync used to send (removed in #34) - EH ignores them.
+probe "legacy: payScheduleId + locationId (ignored by the unstructured endpoint)" \
   "$(node -e 'process.stdout.write(JSON.stringify({payScheduleId:"'"${PAY_SCHEDULE:-}"'"||"0",locationId:"'"${LOCATION:-}"'"||"0"}))')"
 
 # 2. the pay-run-default set, by NAME (the shape docs/eh-pay-defaults.md verifies)
@@ -117,8 +117,8 @@ probe "rejected names (classification / standardHoursPerWeek) - expect silently 
 
 cat <<'EON'
 Read the result:
-  - "baseline" keeping paySchedule/primaryLocation null == the sync's current
-    payScheduleId/locationId keys are ignored (a separate bug).
+  - "legacy" keeping paySchedule/primaryLocation null == confirms why #34
+    removed the payScheduleId/locationId emission.
   - the "by name" probe keeping all fields AND status improving == put that set
     in field-map employmentHero.defaults.
   - "rejected names" keeping nothing == those keys are dead; don't use them.
