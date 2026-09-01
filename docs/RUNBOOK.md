@@ -235,7 +235,16 @@ curl -sS -X POST "https://api.connecteam.com/settings/v1/webhooks" \
 ```
 
 A `200` with `data.id` means it is registered. List them any time with
-`GET /settings/v1/webhooks`.
+`GET /settings/v1/webhooks` — the `enabled` flag there must be true.
+
+> **Confirm the first delivery.** The wizard's last stage prints the registered
+> entry and then offers a live check: edit any mapped field on a test profile
+> and it polls `/health` for ~90 s. `ops.webhookAccepted` going up means
+> Connecteam is delivering and the signature verifies; `ops.webhookRejected`
+> going up means a delivery arrived but its `secretKey` doesn't match
+> `CT_WEBHOOK_SECRET` (delete the webhook and re-register). Nothing after 90 s
+> usually means a wrong URL, a disabled webhook, or an unmapped field — inspect
+> with `npx wrangler tail --format pretty`.
 
 > **Signature scheme (confirmed against a real delivery, #22).**
 > Connecteam webhook `webhookVersion: 1` does **not** sign the body. It sends the
@@ -325,6 +334,8 @@ is passed through `src/redact.ts` regardless. Leave both blank to disable.
 | `ops.queueBacklog` | Sync jobs sent but not yet acked or dead-lettered | a number that only grows |
 | `ops.deadLettered` | jobs that exhausted their retries | anything `> 0` |
 | `ops.lastSweepOkAt` | ISO time the approval sweep last completed cleanly | more than a few minutes stale |
+| `ops.webhookAccepted` | `user_updated` deliveries accepted (`202`) | still `0` long after go-live = the webhook isn't reaching the Worker |
+| `ops.webhookRejected` | `user_updated` deliveries rejected (`401`) | anything `> 0` = a `secretKey` mismatch |
 
 Full request / queue / sweep detail is in the Cloudflare **Workers Logs** for the
 Worker — one JSON line per event, every line passed through `src/redact.ts` first.

@@ -75,6 +75,8 @@ describe("buildHealth", () => {
           { key: "acked_total", num: 7 },
           { key: "dl_total", num: 1 },
           { key: "last_sweep_ok_at", num: 1_700_000_000_000 },
+          { key: "webhook_202_total", num: 4 },
+          { key: "webhook_401_total", num: 2 },
         ]),
       }),
     );
@@ -82,11 +84,19 @@ describe("buildHealth", () => {
       queueBacklog: 2,
       deadLettered: 1,
       lastSweepOkAt: new Date(1_700_000_000_000).toISOString(),
+      webhookAccepted: 4,
+      webhookRejected: 2,
     });
   });
 
   it("reports zeroed ops and a null sweep time before anything has run", async () => {
     const h = await buildHealth(baseEnv());
-    expect(h.ops).toEqual({ queueBacklog: 0, deadLettered: 0, lastSweepOkAt: null });
+    expect(h.ops).toEqual({
+      queueBacklog: 0,
+      deadLettered: 0,
+      lastSweepOkAt: null,
+      webhookAccepted: 0,
+      webhookRejected: 0,
+    });
   });
 });

@@ -34,16 +34,25 @@ app.post("/webhook", async (c) => {
     signatureHeader: c.req.header(DEFAULT_SCHEME.header),
     secret: c.env.CT_WEBHOOK_SECRET,
   });
+  const store = new SyncStore(c.env.DB);
 
   if (outcome.job) {
     try {
       await c.env.SYNC_QUEUE.send(outcome.job);
-      await new SyncStore(c.env.DB).bumpCounter("enqueued_total", 1);
+      await store.bumpCounter("enqueued_total", 1);
     } catch {
       logEvent({ evt: "webhook", status: 503, ctUserId: outcome.job.ctUserId, reason: "enqueue failed" });
       return c.json({ error: "could not enqueue" }, 503);
     }
   }
+
+  // Delivery-outcome counters, surfaced by /health so setup (issue #28) and
+  // ongoing ops can see the webhook is actually live: a 202 means Connecteam
+  // delivered and the signature verified; a 401 means a delivery arrived but
+  // its secretKey did not match CT_WEBHOOK_SECRET.
+  if (outcome.status === 202) await store.bumpCounter("webhook_202_total", 1);
+  else if (outcome.status === 401) await store.bumpCounter("webhook_401_total", 1);
+
   logEvent({
     evt: "webhook",
     status: outcome.status,
