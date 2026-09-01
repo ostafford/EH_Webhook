@@ -2,9 +2,12 @@
  * Optional out-of-band telemetry to the integrator (the person who set the
  * client up), separate from the client's own **alerts channel**. If
  * `INTEGRATOR_ALERT_URL` is set, the Worker POSTs a small JSON body there:
- *   - `{ kind: "system_alert", ctUserId, reason, at }` when a sync dead-letters
- *     (deduped per user for an hour), and
- *   - `{ kind: "health", ok, d1, fieldMap, ops, at }` once every 24 hours.
+ *   - `{ kind: "system_alert", client, ctUserId, reason, at }` when a sync
+ *     dead-letters (deduped per user for an hour), and
+ *   - `{ kind: "health", client, ok, d1, fieldMap, ops, at }` once every 24 h.
+ *
+ * `client` is `INTEGRATOR_CLIENT_ID` - the slug the shared relay
+ * (`integrator-relay/`, issue #23) uses to keep one GitHub issue per client.
  *
  * Best-effort: it never blocks a request or throws. The body carries ids,
  * outcomes and counts only, and is passed through {@link redact} regardless.

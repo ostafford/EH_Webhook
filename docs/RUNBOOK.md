@@ -313,14 +313,18 @@ Off by default. When set, the Worker also sends the integrator a copy of each
 **System alert** (deduped to once per employee per hour) and a once-a-day
 `/health` summary, so the integrator learns about a problem before the client emails.
 
-- `INTEGRATOR_ALERT_URL` (`wrangler.jsonc` var) — a URL the integrator controls
-  (a relay that opens a GitHub issue / sends an email / posts to a channel).
-- `INTEGRATOR_ALERT_SECRET` (Cloudflare secret) — sent as `x-eh-sync-secret` so
-  the relay can reject anything else.
+- `INTEGRATOR_ALERT_URL` (`wrangler.jsonc` var) — the deployed URL of the
+  integrator's relay (`integrator-relay/` in this repo, deployed once by the
+  integrator — see its README).
+- `INTEGRATOR_ALERT_SECRET` (Cloudflare secret) — sent as `x-eh-sync-secret`;
+  must equal the relay's `RELAY_SECRET`.
+- `INTEGRATOR_CLIENT_ID` (`wrangler.jsonc` var) — a short slug for this client
+  (e.g. `acme`); the relay keeps one GitHub issue per client keyed on it.
 
 The payload is **ids, outcomes and counts only** — `{ kind: "system_alert",
-ctUserId, reason, at }` or `{ kind: "health", ok, d1, fieldMap, ops, at }` — and
-is passed through `src/redact.ts` regardless. Leave both blank to disable.
+client, ctUserId, reason, at }` or `{ kind: "health", client, ok, d1, fieldMap,
+ops, at }` — and is passed through `src/redact.ts` regardless. Leave
+`INTEGRATOR_ALERT_URL` blank to disable.
 
 ---
 

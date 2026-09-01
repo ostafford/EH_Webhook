@@ -18,9 +18,12 @@
     "CT_ONBOARDING_PACK_ID": "",
     "CT_CUSTOM_PUBLISHER_ID": "",
     "ADMIN_CONNECTEAM_CHANNEL_ID": "",
-    // Optional integrator telemetry. Blank = off. INTEGRATOR_ALERT_SECRET is a
-    // secret (`wrangler secret put`), not a var.
-    "INTEGRATOR_ALERT_URL": ""
+    // Optional integrator telemetry -> the standalone integrator-relay/ Worker.
+    // Blank URL = off. INTEGRATOR_ALERT_SECRET is a secret (`wrangler secret
+    // put`), not a var, and must equal the relay's RELAY_SECRET.
+    "INTEGRATOR_ALERT_URL": "",
+    // Short slug for this client on the shared relay (e.g. "acme").
+    "INTEGRATOR_CLIENT_ID": ""
   },
 
   "d1_databases": [
