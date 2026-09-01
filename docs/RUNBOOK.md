@@ -266,6 +266,12 @@ Manual-follow-up notice. When several apply at once (e.g. a non-resident whose
 record is also `Incomplete` for pay-run defaults) they are listed together in a
 single notice.
 
+> While a record stays `Incomplete`, every later profile edit re-runs the sync
+> and would re-post the same notice. The channel gets it **once per ~12 hours per
+> employee per reason-set** — a notice whose reasons actually change (e.g.
+> non-resident newly added) still posts straight away, and the audit log
+> (`sync_log`) still records every attempt.
+
 > A non-resident for tax who *also* answered "yes" to the tax-free threshold is a
 > contradiction EH rejects — the sync catches it first and sends the employee a
 > Correction ("set that answer to No"), not a follow-up.
@@ -328,8 +334,8 @@ Worker — one JSON line per event, every line passed through `src/redact.ts` fi
 | Message | Recipient | Action |
 |---|---|---|
 | **Correction message** | the employee (DM); + Direct manager on the 3rd failed attempt in a row | the employee fixes the named field(s) in Connecteam; **their next profile edit re-syncs** (see below) |
-| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** |
-| **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job |
+| **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** — re-posted at most once per ~12 h per employee per reason-set |
+| **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job — re-posted at most once per hour per employee while the fault persists |
 
 ### Re-syncing an employee
 A resync is triggered by a **profile edit** in Connecteam (the `user_updated`

@@ -25,6 +25,12 @@ import {
 } from "./messages.js";
 import { advanceCycle, directManagerUserId } from "./cycles.js";
 import { payloadHash } from "./canonical.js";
+import {
+  noticeKey,
+  shouldPostNotice,
+  FOLLOW_UP_NOTICE_DEDUPE_MS,
+  SYSTEM_ALERT_NOTICE_DEDUPE_MS,
+} from "./notices.js";
 import type { SyncGateway, SyncOutcomeLabel } from "./gateway.js";
 
 export interface SyncDeps {
@@ -48,6 +54,8 @@ export interface SyncJobOutcome {
   reason: string;
   ehEmployeeId?: string;
   managerNotified?: boolean;
+  /** A follow-up decision whose channel notice was suppressed as a recent duplicate. */
+  noticeSuppressed?: boolean;
 }
 
 export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobOutcome> {
@@ -118,6 +126,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   const person = { ctUserId, firstName: user.firstName, lastName: user.lastName };
 
   let managerNotified = false;
+  let noticeSuppressed = false;
   if (decision.kind === "correction") {
     await deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields));
     if (cycle.action === "correction" && cycle.notifyManager) {
@@ -128,10 +137,18 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
       }
     }
   } else if (decision.kind === "follow_up") {
-    await deps.ct.sendChannelMessage(
-      deps.adminChannelId,
-      followUpNoticeMessage(decision.reasons, person),
-    );
+    // The record synced (safe defaults); a payroll admin still has to finish it
+    // by hand in EH. While that stays undone, every later profile edit lands
+    // here again with the same reason - post it once per window, not per edit.
+    const key = await noticeKey("follow_up", ctUserId, decision.reasons);
+    if (await shouldPostNotice(deps.store, key, FOLLOW_UP_NOTICE_DEDUPE_MS, now())) {
+      await deps.ct.sendChannelMessage(
+        deps.adminChannelId,
+        followUpNoticeMessage(decision.reasons, person),
+      );
+    } else {
+      noticeSuppressed = true;
+    }
   }
 
   // Store the hash on every terminal outcome so an identical re-delivery is
@@ -155,6 +172,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     reason: auditDetail(decision),
     ...(ehEmployeeId ? { ehEmployeeId } : {}),
     managerNotified,
+    ...(noticeSuppressed ? { noticeSuppressed: true } : {}),
   };
 }
 
@@ -238,19 +256,24 @@ export async function handleDeadLetter(
   const now = deps.now ?? Date.now;
   const detail = `the sync exceeded its retry limit (trigger "${job.reason}")`;
 
-  // Best effort: put the employee's name in the alert. The sync is already
-  // failing, so a failed lookup just falls back to the id.
-  let person: PersonRef = { ctUserId: job.ctUserId };
-  try {
-    const res = await deps.ct.getUser(job.ctUserId);
-    if (res.outcome === "ok" && res.data) {
-      person = { ctUserId: job.ctUserId, firstName: res.data.firstName, lastName: res.data.lastName };
+  // A user whose job keeps dead-lettering (EH auth down, a mapping bug) would
+  // otherwise post an identical alert on every retry-exhaustion. Post it once
+  // per window; the audit row below is still written every time.
+  const key = await noticeKey("system_alert", job.ctUserId, [detail]);
+  if (await shouldPostNotice(deps.store, key, SYSTEM_ALERT_NOTICE_DEDUPE_MS, now())) {
+    // Best effort: put the employee's name in the alert. The sync is already
+    // failing, so a failed lookup just falls back to the id.
+    let person: PersonRef = { ctUserId: job.ctUserId };
+    try {
+      const res = await deps.ct.getUser(job.ctUserId);
+      if (res.outcome === "ok" && res.data) {
+        person = { ctUserId: job.ctUserId, firstName: res.data.firstName, lastName: res.data.lastName };
+      }
+    } catch {
+      // keep the id-only ref
     }
-  } catch {
-    // keep the id-only ref
+    await deps.ct.sendChannelMessage(deps.adminChannelId, systemAlertMessage(detail, person));
   }
-
-  await deps.ct.sendChannelMessage(deps.adminChannelId, systemAlertMessage(detail, person));
   await deps.store.appendSyncLog({
     ctUserId: job.ctUserId,
     at: now(),

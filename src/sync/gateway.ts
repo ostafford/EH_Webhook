@@ -44,4 +44,8 @@ export interface SyncGateway extends CycleStore {
   appendSyncLog(entry: SyncLogEntry): Promise<void>;
   /** Add `delta` to an operational counter for /health (queue backlog etc.). */
   bumpCounter(key: string, delta: number): Promise<void>;
+  /** Read named `sync_meta` counters/markers; missing keys come back as 0. */
+  readMeta(keys: string[]): Promise<Record<string, number>>;
+  /** Set a `sync_meta` marker to an absolute value (e.g. a "notice last sent" ms). */
+  setMarker(key: string, value: number): Promise<void>;
 }
