@@ -16,13 +16,36 @@ export interface EhFieldError {
 const NO_FIELD = "(unknown)";
 const LINE = /^([A-Za-z0-9_.\[\]]+):\s+(.*\S)\s*$/;
 
+/**
+ * Shape 2 (issue #29): EH also sends validation reasons as bare prose with no
+ * `Field:` prefix - "Tax File Number is invalid", "Tax free threshold can only
+ * be claimed for Australian residents", "The sum of the allocated percentage
+ * should total 100 for bank accounts". Map the known phrases back to an EH
+ * field so the audit row names it and the employee-facing curated line
+ * (src/sync/messages.ts) is chosen from the field as well as the words, instead
+ * of falling through to the fully generic correction. First match wins, most
+ * specific first; seed from what shows up in `sync_log` and extend.
+ */
+const COLONLESS_REASON_FIELDS: ReadonlyArray<{ match: RegExp; field: string }> = [
+  { match: /tax file number/i, field: "taxFileNumber" },
+  { match: /tax[-\s]?free threshold/i, field: "taxFreeThreshold" },
+  { match: /allocated percentage.*\b(super|fund)/i, field: "superAllocation" },
+  { match: /allocated percentage/i, field: "bankAccountAllocation" },
+];
+
+/** An EH field name for a colon-less reason line, or "(unknown)" if unrecognised. */
+export function fieldForColonlessReason(reason: string): string {
+  for (const { match, field } of COLONLESS_REASON_FIELDS) if (match.test(reason)) return field;
+  return NO_FIELD;
+}
+
 function fromMessageString(message: string): EhFieldError[] {
   const out: EhFieldError[] = [];
   for (const raw of message.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
     const m = LINE.exec(line);
-    out.push(m ? { field: m[1]!, reason: m[2]! } : { field: NO_FIELD, reason: line });
+    out.push(m ? { field: m[1]!, reason: m[2]! } : { field: fieldForColonlessReason(line), reason: line });
   }
   return out;
 }
@@ -49,7 +72,8 @@ export function parseValidationBody(body: unknown): EhFieldError[] {
   if (Array.isArray(body)) {
     const errs = body
       .filter((x): x is string => typeof x === "string" && x.trim() !== "")
-      .map((reason) => ({ field: NO_FIELD, reason: reason.trim() }));
+      .map((raw) => raw.trim())
+      .map((reason) => ({ field: fieldForColonlessReason(reason), reason }));
     if (errs.length) return errs;
   }
 
