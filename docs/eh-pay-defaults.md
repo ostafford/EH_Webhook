@@ -41,33 +41,35 @@ templates, one pay schedule (`Weekly` / `32407`), one location (`Connecteam` /
    Complete for a single-rate workforce"; anything with real pay bands still
    needs per-employee entry (Connecteam custom field or manual EH).
 
-## Pre-existing bug found by the probe (NOT #26)
+## Bug found by the probe — fixed in #34
 
-`src/mapping/apply.ts` sets `payScheduleId` and `locationId` on every payload
-from `clients/self/field-map.json`. **EH's unstructured endpoint ignores those
-key names** — the live test employee `14246310` has `paySchedule: null`,
-`primaryLocation: null` despite the sync. The correct input keys are
-`paySchedule` and `primaryLocation`, **by name**. Fixing it means the field-map
-carries names (`"Weekly"`, `"Connecteam"`) instead of ids. Tracked separately —
-see the issue raised from this probe.
+`src/mapping/apply.ts` used to set `payScheduleId` and `locationId` on every
+payload. **EH's unstructured endpoint ignores those key names** — the live test
+employee `14246310` had `paySchedule: null`, `primaryLocation: null` despite the
+sync. #34 removed that dead emission. Pay schedule and location now go through
+`defaults` as `paySchedule` / `primaryLocation`, **by name**, as part of the
+all-or-nothing set — so they only ship when the client has also given a pay
+category, rate and rate unit (a lone `paySchedule` is a `400`).
 
-## What this PR ships
+## What ships
 
 - `field-map.json` schema accepts an opt-in `employmentHero.defaults` block with
   the **verified** field names:
-  `{ awardId?, primaryPayCategory?, rate?, rateUnit?, hoursPerWeek?, hoursPerDay? }`.
-- `applyFieldMap` folds every present default into the payload verbatim, beside
-  the structural values.
+  `{ paySchedule?, primaryLocation?, primaryPayCategory?, rate?, rateUnit?, hoursPerWeek?, hoursPerDay?, awardId? }`.
+- `applyFieldMap` folds every present default into the payload verbatim, by name.
+  When the block is absent it emits **no** pay-run keys at all (record lands
+  `Incomplete`, an admin finishes it — unchanged from before).
 - `scripts/probe-eh-pay-defaults.sh` — the probe above, re-runnable against any
   test business.
-- Opt-in only: `_example` / `self` don't set the block, so it can't change an
-  existing deployment.
+- Opt-in only: `_example` / `self` don't set the block.
 
 ## Not doing (yet)
 
-- **Auto-flip to Complete.** `defaults` only helps a single-rate workforce, and
-  even then only once the `paySchedule` / `primaryLocation` bug above is fixed so
-  the *whole* pay-run set actually lands.
+- **Auto-flip to Complete.** `defaults` only helps a single-rate workforce;
+  anything with real pay bands still needs per-employee entry.
 - **Sourcing values from Connecteam "Customizable defaults".**
 - **`classification` / award classification** — needs a business with awards to
   probe, and likely a `payRateTemplate` rather than a bare field.
+- **Retiring the `EH_PAY_SCHEDULE_ID` / `EH_LOCATION_ID` env vars** — still read
+  by `/health` for a `businessConfigured` flag (never sent to EH). The field-map
+  `payScheduleId` / `locationId` are kept only so the wizard can derive them.

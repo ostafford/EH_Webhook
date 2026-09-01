@@ -115,11 +115,12 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
 }
 
 /**
- * Fold the opt-in `employmentHero.defaults` block (issue #26) into the payload.
- * The schema key names already match the EH unstructured-employee field names
- * (`awardId`, `primaryPayCategory`, `rate`, `rateUnit`, `hoursPerWeek`,
- * `hoursPerDay`) verified in `docs/eh-pay-defaults.md`, so this is a verbatim
- * copy - EH validates the pay-run set all-or-nothing.
+ * Fold the opt-in `employmentHero.defaults` block (issues #26, #34) into the
+ * payload. The schema key names already match the EH unstructured-employee
+ * field names (`paySchedule`, `primaryLocation`, `primaryPayCategory`, `rate`,
+ * `rateUnit`, `hoursPerWeek`, `hoursPerDay`, `awardId`) verified in
+ * `docs/eh-pay-defaults.md`, so this is a verbatim copy - EH validates the
+ * pay-run set all-or-nothing.
  */
 function applyPayDefaults(
   payload: Record<string, PayloadValue>,
@@ -154,9 +155,10 @@ export function applyFieldMap(user: ConnecteamUser, map: FieldMap): MappingResul
     acc.payload[key] = value;
   }
 
-  // Structural values from the client config.
-  acc.payload.payScheduleId = map.employmentHero.payScheduleId;
-  acc.payload.locationId = map.employmentHero.locationId;
+  // Pay schedule / location / pay category etc. only apply when the client has
+  // provided the COMPLETE pay-run set via `employmentHero.defaults` - EH's
+  // unstructured endpoint validates that set all-or-nothing and ignores the
+  // legacy `payScheduleId` / `locationId` keys entirely (issue #34).
   applyPayDefaults(acc.payload, map.employmentHero.defaults);
 
   const externalId = String(user.userId);

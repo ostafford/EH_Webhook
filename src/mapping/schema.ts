@@ -79,20 +79,32 @@ export const fieldMap = z
     employmentHero: z
       .object({
         businessId: z.string().min(1),
+        /**
+         * NOT sent to Employment Hero (issue #34): the unstructured endpoint
+         * ignores the `payScheduleId` / `locationId` key names outright. Kept
+         * only so `scripts/setup-wizard.sh` can derive the `EH_PAY_SCHEDULE_ID`
+         * / `EH_LOCATION_ID` health vars. Pay-run settings that actually apply
+         * go in `defaults` below, BY NAME.
+         */
         payScheduleId: z.string().min(1),
         locationId: z.string().min(1),
         /**
-         * Company-wide pay-run defaults, stamped on every payload beside the
-         * structural values (issue #26). Fully opt-in: omit the block and
-         * nothing changes. Field names verified against the live unstructured
-         * endpoint (`docs/eh-pay-defaults.md`): EH takes the pay category /
-         * award by NAME, and validates the pay-run set all-or-nothing - a
-         * partial set is a 400, so set every field or none.
+         * Company-wide pay-run settings, stamped on every payload (issue #26).
+         * Fully opt-in: omit the block and nothing changes (records land
+         * `Incomplete` and a payroll admin finishes them by hand). Field names
+         * verified against the live unstructured endpoint
+         * (`docs/eh-pay-defaults.md`): EH takes pay schedule / location / pay
+         * category / award BY NAME and validates the set **all-or-nothing** -
+         * a partial set is a 400, so provide the complete working set
+         * (`paySchedule` + `primaryLocation` + `primaryPayCategory` + `rate` +
+         * `rateUnit`, plus optional hours / award) or none of it.
          */
         defaults: z
           .object({
-            /** Award name/id (validated against the business). */
-            awardId: z.union([z.string().min(1), z.number()]).optional(),
+            /** Pay schedule, by NAME (e.g. "Weekly"). */
+            paySchedule: z.string().min(1).optional(),
+            /** Primary location, by NAME (e.g. "Head Office"). */
+            primaryLocation: z.string().min(1).optional(),
             /** Primary pay category, by NAME (e.g. "Permanent Ordinary Hours"). */
             primaryPayCategory: z.string().min(1).optional(),
             rate: z.number().nonnegative().optional(),
@@ -100,6 +112,8 @@ export const fieldMap = z
             rateUnit: z.string().min(1).optional(),
             hoursPerWeek: z.number().positive().optional(),
             hoursPerDay: z.number().positive().optional(),
+            /** Award name/id (validated against the business). */
+            awardId: z.union([z.string().min(1), z.number()]).optional(),
           })
           .strict()
           .optional(),
