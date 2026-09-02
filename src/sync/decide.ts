@@ -41,6 +41,14 @@ export interface DecideInput {
   followUps?: string[];
   /** Optional post-write read-back comparison (non-sensitive fields only). */
   readBack?: ReadBackResult;
+  /**
+   * The client shipped the complete company-wide pay-run set via
+   * `employmentHero.defaults` (issue #26). When that is true and EH *still*
+   * reports the pay-run axis incomplete, the fix is a one-time field-map
+   * correction (the default names don't match the business), not per-employee
+   * admin setup - so the follow-up says that instead.
+   */
+  payRunDefaultsComplete?: boolean;
 }
 
 const INCOMPLETE = "incomplete";
@@ -62,8 +70,22 @@ const INCOMPLETE = "incomplete";
 const ADMIN_ONLY_INCOMPLETE =
   /pay run default|pay-run default|pay category|pay rate|\baward\b|classification|employing entity|employee default|leave allowance|opening balance|work type/i;
 
+/**
+ * The subset of admin-only phrases that a complete `employmentHero.defaults`
+ * block is meant to satisfy (pay schedule / location / pay category / rate).
+ * `award` / `classification` / `employing entity` etc. are deliberately absent -
+ * `defaults` does not fully cover those, so they stay genuine admin follow-ups
+ * even when the pay-run set is configured.
+ */
+const PAY_RUN_SET_INCOMPLETE =
+  /pay run default|pay-run default|pay category|pay rate|pay schedule|primary location|employee default/i;
+
 function incompleteIsAdminOnly(detailedStatus: string | null): boolean {
   return ADMIN_ONLY_INCOMPLETE.test(detailedStatus ?? "");
+}
+
+function incompleteIsPayRunSet(detailedStatus: string | null): boolean {
+  return PAY_RUN_SET_INCOMPLETE.test(detailedStatus ?? "");
 }
 
 function adminIncompleteReason(detailedStatus: string | null): string {
@@ -71,6 +93,20 @@ function adminIncompleteReason(detailedStatus: string | null): string {
   return `Employment Hero marked the record incomplete${
     s ? ` ("${s}")` : ""
   } - a payroll admin needs to finish the employee's setup in Employment Hero (e.g. pay-run defaults / award / pay rate).`;
+}
+
+/**
+ * The client configured a complete company-wide pay-run set, yet EH still flags
+ * the pay-run axis incomplete: the default *values* did not validate against the
+ * business (a wrong pay-category / location / pay-schedule name is accepted on
+ * the create with a 200 but silently not applied). One field-map fix clears it
+ * for every employee - it is not per-person admin work.
+ */
+function payDefaultsRejectedReason(detailedStatus: string | null): string {
+  const s = (detailedStatus ?? "").trim();
+  return `Employment Hero still reports the pay-run defaults incomplete${
+    s ? ` ("${s}")` : ""
+  } even though company-wide employmentHero.defaults are set - the default names likely do not match this business (check paySchedule / primaryLocation / primaryPayCategory / rateUnit). Fix the field-map once; it applies to every employee.`;
 }
 
 export function decide(input: DecideInput): SyncDecision {
@@ -95,11 +131,15 @@ export function decide(input: DecideInput): SyncDecision {
       const { status, detailedStatus } = write.data;
       if ((status ?? "").toLowerCase().includes(INCOMPLETE)) {
         if (incompleteIsAdminOnly(detailedStatus)) {
+          const payRunReason =
+            input.payRunDefaultsComplete && incompleteIsPayRunSet(detailedStatus)
+              ? payDefaultsRejectedReason(detailedStatus)
+              : adminIncompleteReason(detailedStatus);
           // Surface any other admin follow-ups (non-resident, SMSF, INTERNATIONAL
           // address) in the same notice rather than losing them.
           return {
             kind: "follow_up",
-            reasons: [adminIncompleteReason(detailedStatus), ...(input.followUps ?? [])],
+            reasons: [payRunReason, ...(input.followUps ?? [])],
           };
         }
         return { kind: "correction", fields: [incompleteFieldError(detailedStatus)] };
