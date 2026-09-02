@@ -43,7 +43,27 @@ export interface MappingResult {
   issues: MappingIssue[];
   /** Valid data that still needs a human step in EH (non-resident, SMSF, ...). */
   followUps: string[];
+  /**
+   * True when `employmentHero.defaults` carried the complete pay-run set
+   * (`paySchedule` + `primaryLocation` + `primaryPayCategory` + `rate` +
+   * `rateUnit`) - EH's pay-run axis should be satisfied for this record, so a
+   * later "pay run defaults incomplete" from EH is a field-map misconfiguration
+   * (one fix for the whole business), not per-employee admin work (issue #26).
+   */
+  payRunDefaultsComplete: boolean;
 }
+
+/**
+ * The pay-run fields EH validates all-or-nothing on the unstructured endpoint
+ * (`docs/eh-pay-defaults.md`). Hours and award are optional extras.
+ */
+const PAY_RUN_REQUIRED = [
+  "paySchedule",
+  "primaryLocation",
+  "primaryPayCategory",
+  "rate",
+  "rateUnit",
+] as const;
 
 const BASE: Record<TransformName, (v: unknown) => string> = {
   trimString: t.trimString,
@@ -125,11 +145,16 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
 function applyPayDefaults(
   payload: Record<string, PayloadValue>,
   defaults: FieldMap["employmentHero"]["defaults"],
-): void {
-  if (!defaults) return;
+): { complete: boolean } {
+  if (!defaults) return { complete: false };
   for (const [key, value] of Object.entries(defaults)) {
     if (value !== undefined) payload[key] = value as PayloadValue;
   }
+  const complete = PAY_RUN_REQUIRED.every((k) => {
+    const v = defaults[k];
+    return v !== undefined && v !== null && v !== "";
+  });
+  return { complete };
 }
 
 function mergeRuleOutput(
@@ -159,7 +184,10 @@ export function applyFieldMap(user: ConnecteamUser, map: FieldMap): MappingResul
   // provided the COMPLETE pay-run set via `employmentHero.defaults` - EH's
   // unstructured endpoint validates that set all-or-nothing and ignores the
   // legacy `payScheduleId` / `locationId` keys entirely (issue #34).
-  applyPayDefaults(acc.payload, map.employmentHero.defaults);
+  const { complete: payRunDefaultsComplete } = applyPayDefaults(
+    acc.payload,
+    map.employmentHero.defaults,
+  );
 
   const externalId = String(user.userId);
   acc.payload.externalId = externalId;
@@ -173,5 +201,12 @@ export function applyFieldMap(user: ConnecteamUser, map: FieldMap): MappingResul
       ? user.email.trim().toLowerCase()
       : undefined;
 
-  return { externalId, emailFallback, payload: acc.payload, issues: acc.issues, followUps: acc.followUps };
+  return {
+    externalId,
+    emailFallback,
+    payload: acc.payload,
+    issues: acc.issues,
+    followUps: acc.followUps,
+    payRunDefaultsComplete,
+  };
 }

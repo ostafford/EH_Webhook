@@ -116,7 +116,12 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
         );
       }
     }
-    decision = decide({ write, followUps: mapped.followUps, ...(readBack ? { readBack } : {}) });
+    decision = decide({
+      write,
+      followUps: mapped.followUps,
+      payRunDefaultsComplete: mapped.payRunDefaultsComplete,
+      ...(readBack ? { readBack } : {}),
+    });
   }
 
   if (decision.kind === "retry") return { status: "retry", reason: decision.detail };

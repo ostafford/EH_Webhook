@@ -73,6 +73,36 @@ describe("decide", () => {
     ]);
   });
 
+  it("re-routes the pay-run follow-up to a field-map fix when defaults are complete but EH still flags pay-run (issue #26)", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Pay Run Defaults are incomplete" }),
+      payRunDefaultsComplete: true,
+    });
+    expect(d.kind).toBe("follow_up");
+    const [reason] = (d as { reasons: string[] }).reasons;
+    expect(reason).toContain("employmentHero.defaults");
+    expect(reason).toContain("do not match this business");
+    expect(reason).not.toContain("a payroll admin needs to finish");
+  });
+
+  it("keeps the plain admin follow-up when defaults are complete but EH flags award (not covered by defaults)", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Award classification is incomplete" }),
+      payRunDefaultsComplete: true,
+    });
+    expect(d.kind).toBe("follow_up");
+    expect((d as { reasons: string[] }).reasons[0]).toContain("a payroll admin needs to finish");
+  });
+
+  it("keeps the plain admin follow-up for pay-run when defaults are NOT complete", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Pay Run Defaults are incomplete" }),
+      payRunDefaultsComplete: false,
+    });
+    expect(d.kind).toBe("follow_up");
+    expect((d as { reasons: string[] }).reasons[0]).toContain("a payroll admin needs to finish");
+  });
+
   it("a read-back mismatch on a clean-status write becomes a correction", () => {
     const d = decide({
       write: okWrite(),
