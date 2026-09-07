@@ -42,7 +42,7 @@
     { "eh": "emergencyContact1_Name", "from": { "customFieldId": 42708535 }, "transform": "trimString" },
     { "eh": "emergencyContact1_ContactNumber", "from": { "customFieldId": 42708537 }, "transform": "trimString" },
     { "eh": "emergencyContact1_Relationship", "from": { "customFieldId": 42708536 }, "transform": "trimString" },
-    { "eh": "taxFileNumber", "from": { "customFieldId": 42923222 }, "transform": "digits", "sensitive": true },
+    { "eh": "taxFileNumber", "from": { "customFieldId": 42923222 }, "transform": "digits", "required": true, "sensitive": true },
     { "eh": "bankAccount1_AccountName", "from": { "customFieldId": 42921173 }, "transform": "trimString", "sensitive": true },
     { "eh": "bankAccount1_BSB", "from": { "customFieldId": 42923223 }, "transform": "zeroPad6", "sensitive": true },
     { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true }
@@ -60,7 +60,8 @@
       "memberNumberField": 42920804
     },
     "constants": {
-      "bankAccount1_AllocatedPercentage": 100
+      "bankAccount1_AllocatedPercentage": 100,
+      "bankAccount1": "Electronic"
     }
   }
 }
