@@ -13,8 +13,6 @@
     // multi-tenant deployment (see src/mapping/registry.ts).
     "FIELD_MAP_CLIENT": "",
     "EH_BUSINESS_ID": "",
-    "EH_PAY_SCHEDULE_ID": "",
-    "EH_LOCATION_ID": "",
     "CT_ONBOARDING_PACK_ID": "",
     "CT_CUSTOM_PUBLISHER_ID": "",
     "ADMIN_CONNECTEAM_CHANNEL_ID": "",

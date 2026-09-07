@@ -15,8 +15,6 @@ const baseEnv = (over: Partial<HealthEnv> = {}): HealthEnv => ({
   DB: okDb(),
   FIELD_MAP_CLIENT: "_example",
   EH_BUSINESS_ID: "",
-  EH_PAY_SCHEDULE_ID: "",
-  EH_LOCATION_ID: "",
   ...over,
 });
 
@@ -60,10 +58,8 @@ describe("buildHealth", () => {
     expect(h.config.fieldMapClient).toBe("missing");
   });
 
-  it("reports businessConfigured once all three EH ids are set", async () => {
-    const h = await buildHealth(
-      baseEnv({ EH_BUSINESS_ID: "555455", EH_PAY_SCHEDULE_ID: "32407", EH_LOCATION_ID: "436590" }),
-    );
+  it("reports businessConfigured once EH_BUSINESS_ID is set", async () => {
+    const h = await buildHealth(baseEnv({ EH_BUSINESS_ID: "555455" }));
     expect(h.config.businessConfigured).toBe(true);
   });
 

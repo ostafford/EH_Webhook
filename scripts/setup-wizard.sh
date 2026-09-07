@@ -312,16 +312,13 @@ say ""
 warn "Now open clients/self/field-map.json and check EVERY mapped field ID,"
 warn "resolve any TODO, and confirm the enum maps (gender / state / employmentType)."
 pause "Press Enter when the field map is tuned."
-for pair in "businessId:EH_BUSINESS_ID" "payScheduleId:EH_PAY_SCHEDULE_ID" "locationId:EH_LOCATION_ID"; do
-  jkey="${pair%%:*}"; env_k="${pair##*:}"
-  v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).$jkey||'')")
-  if [[ -z "$v" || "$v" == "TODO" ]]; then
-    ask "$env_k" "Enter $env_k:"
-    v="${!env_k}"
-  fi
-  write_env "$env_k" "$v"
-  set_jsonc "$env_k" "$v"
-done
+v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).businessId||'')")
+if [[ -z "$v" || "$v" == "TODO" ]]; then
+  ask EH_BUSINESS_ID "Enter EH_BUSINESS_ID:"
+  v="$EH_BUSINESS_ID"
+fi
+write_env EH_BUSINESS_ID "$v"
+set_jsonc EH_BUSINESS_ID "$v"
 say "Running the test suite..."
 npm test
 say "Tests pass."

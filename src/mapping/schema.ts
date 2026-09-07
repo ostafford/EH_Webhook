@@ -80,14 +80,16 @@ export const fieldMap = z
       .object({
         businessId: z.string().min(1),
         /**
-         * NOT sent to Employment Hero (issue #34): the unstructured endpoint
-         * ignores the `payScheduleId` / `locationId` key names outright. Kept
-         * only so `scripts/setup-wizard.sh` can derive the `EH_PAY_SCHEDULE_ID`
-         * / `EH_LOCATION_ID` health vars. Pay-run settings that actually apply
-         * go in `defaults` below, BY NAME.
+         * Reference only, and optional. The numeric pay-schedule / location IDs
+         * `scripts/discover.ts` finds for the business - handy when filling in
+         * `defaults` below, which names the same schedule/location. NOT sent to
+         * Employment Hero (issue #34 - the unstructured endpoint ignores these
+         * key names) and no longer read by the Worker (issue #26 retired the
+         * `EH_PAY_SCHEDULE_ID` / `EH_LOCATION_ID` env vars they used to seed).
+         * Pay-run settings that actually apply go in `defaults`, BY NAME.
          */
-        payScheduleId: z.string().min(1),
-        locationId: z.string().min(1),
+        payScheduleId: z.string().min(1).optional(),
+        locationId: z.string().min(1).optional(),
         /**
          * Company-wide pay-run settings, stamped on every payload (issue #26).
          * Fully opt-in: omit the block and nothing changes (records land

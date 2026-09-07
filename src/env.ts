@@ -16,8 +16,6 @@ export interface Env {
   /** Only for a multi-tenant deployment; blank/unset loads clients/self/. */
   FIELD_MAP_CLIENT?: string;
   EH_BUSINESS_ID: string;
-  EH_PAY_SCHEDULE_ID: string;
-  EH_LOCATION_ID: string;
   CT_ONBOARDING_PACK_ID: string;
   CT_CUSTOM_PUBLISHER_ID: string;
   ADMIN_CONNECTEAM_CHANNEL_ID: string;
