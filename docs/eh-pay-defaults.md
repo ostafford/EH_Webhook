@@ -62,11 +62,24 @@ category, rate and rate unit (a lone `paySchedule` is a `400`).
 - `scripts/probe-eh-pay-defaults.sh` — the probe above, re-runnable against any
   test business.
 - Opt-in only: `_example` / `self` don't set the block.
+- **Follow-up re-routing when the set is complete.** `applyFieldMap` now returns
+  `payRunDefaultsComplete` (true when `paySchedule` + `primaryLocation` +
+  `primaryPayCategory` + `rate` + `rateUnit` are all set). When that is true and
+  EH *still* reports the record `Incomplete` for a pay-run reason
+  (`decide.ts` → `PAY_RUN_SET_INCOMPLETE`), the Manual-follow-up notice no longer
+  says "a payroll admin needs to finish this employee by hand" — it says the
+  configured default *names* don't match the business and the field-map needs one
+  fix for the whole workforce. `award` / `classification` / `employing entity`
+  phrases are excluded from that re-route (defaults don't cover them) and still
+  produce the plain admin follow-up. In the happy path — complete set, names
+  valid — EH returns no pay-run phrase at all, so no pay-run notice fires.
 
 ## Not doing (yet)
 
-- **Auto-flip to Complete.** `defaults` only helps a single-rate workforce;
-  anything with real pay bands still needs per-employee entry.
+- **True auto-flip to Complete.** EH owns `status`; the sync can't set it. The
+  re-routing above only relabels the notice — `defaults` still only helps a
+  single-rate workforce, and anything with real pay bands needs per-employee
+  entry.
 - **Sourcing values from Connecteam "Customizable defaults".**
 - **`classification` / award classification** — needs a business with awards to
   probe, and likely a `payRateTemplate` rather than a bare field.

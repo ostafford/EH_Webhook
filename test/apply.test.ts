@@ -58,10 +58,11 @@ describe("parseFieldMap", () => {
 
 describe("applyFieldMap - employmentHero.defaults (issues #26, #34)", () => {
   it("does nothing when the block is absent - no pay-run keys at all", () => {
-    const { payload } = applyFieldMap(clone(), map);
+    const { payload, payRunDefaultsComplete } = applyFieldMap(clone(), map);
     for (const k of ["paySchedule", "primaryLocation", "payScheduleId", "locationId", "primaryPayCategory", "rate", "awardId"]) {
       expect(payload[k as keyof typeof payload]).toBeUndefined();
     }
+    expect(payRunDefaultsComplete).toBe(false);
   });
 
   it("stamps the complete pay-run set onto the payload verbatim, by name", () => {
@@ -81,8 +82,9 @@ describe("applyFieldMap - employmentHero.defaults (issues #26, #34)", () => {
         },
       },
     });
-    const { payload, issues } = applyFieldMap(clone(), withDefaults);
+    const { payload, issues, payRunDefaultsComplete } = applyFieldMap(clone(), withDefaults);
     expect(issues).toEqual([]);
+    expect(payRunDefaultsComplete).toBe(true);
     expect(payload.paySchedule).toBe("Weekly");
     expect(payload.primaryLocation).toBe("Head Office");
     expect(payload.primaryPayCategory).toBe("Permanent Ordinary Hours");
@@ -101,10 +103,12 @@ describe("applyFieldMap - employmentHero.defaults (issues #26, #34)", () => {
       ...map,
       employmentHero: { ...map.employmentHero, defaults: { primaryPayCategory: "Salary" } },
     });
-    const { payload } = applyFieldMap(clone(), withOne);
+    const { payload, payRunDefaultsComplete } = applyFieldMap(clone(), withOne);
     expect(payload.primaryPayCategory).toBe("Salary");
     expect(payload.hoursPerWeek).toBeUndefined();
     expect(payload.awardId).toBeUndefined();
+    // a partial set is not "complete" - EH would 400 it, so no auto-flip
+    expect(payRunDefaultsComplete).toBe(false);
   });
 });
 
