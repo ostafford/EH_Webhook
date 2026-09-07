@@ -73,6 +73,12 @@ category, rate and rate unit (a lone `paySchedule` is a `400`).
   phrases are excluded from that re-route (defaults don't cover them) and still
   produce the plain admin follow-up. In the happy path — complete set, names
   valid — EH returns no pay-run phrase at all, so no pay-run notice fires.
+- **`EH_PAY_SCHEDULE_ID` / `EH_LOCATION_ID` env vars retired.** Since #34 they
+  were never sent to EH; they only fed `/health`'s `businessConfigured` flag,
+  which now reads `EH_BUSINESS_ID` alone. `wrangler.jsonc`, `src/env.ts`,
+  `src/health.ts`, the wizard and `discover.ts` no longer mention them. The
+  field-map keeps `employmentHero.payScheduleId` / `locationId` as **optional**
+  reference (the numeric IDs behind the `defaults` names); nothing reads them.
 
 ## Not doing (yet)
 
@@ -80,9 +86,16 @@ category, rate and rate unit (a lone `paySchedule` is a `400`).
   re-routing above only relabels the notice — `defaults` still only helps a
   single-rate workforce, and anything with real pay bands needs per-employee
   entry.
-- **Sourcing values from Connecteam "Customizable defaults".**
+- **Sourcing values from Connecteam "Customizable defaults".** Checked the
+  public API (2026-09, `developer.connecteam.com/llms.txt`): **no endpoint
+  exposes it.** The nearest surfaces are `pay_rates/v1` (strictly **per-user**
+  rate: `effectiveDate` + `rateType` `hourly|monthly|yearly` + amount, with
+  `useDefaultRate` / `useParentRate` inheritance flags) and
+  `company-policies/v1/pay-rule-policies` (GET returns only `{id, name}`; PUT
+  only assigns users). Neither carries pay category, award, classification,
+  standard hours, pay schedule or location. The "Customizable defaults" screen
+  is UI-only. **Conclusion: the field-map `defaults` block stays the only
+  source.** (Separate idea, not #26: the per-user `pay_rates` API *could* feed
+  the genuinely-per-person `rate` into the sync instead of a manual EH entry.)
 - **`classification` / award classification** — needs a business with awards to
   probe, and likely a `payRateTemplate` rather than a bare field.
-- **Retiring the `EH_PAY_SCHEDULE_ID` / `EH_LOCATION_ID` env vars** — still read
-  by `/health` for a `businessConfigured` flag (never sent to EH). The field-map
-  `payScheduleId` / `locationId` are kept only so the wizard can derive them.

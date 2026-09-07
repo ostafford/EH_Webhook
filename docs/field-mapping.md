@@ -18,10 +18,15 @@ Read-back: `GET /api/v2/business/{businessId}/employee/unstructured/externalid/{
 | Config key | This account | How the client finds theirs |
 |---|---|---|
 | `EH_BUSINESS_ID` | `555455` | `GET /api/v2/business` |
-| `EH_PAY_SCHEDULE_ID` | `32407` (Weekly) | `GET /business/{id}/payschedule` |
-| `EH_LOCATION_ID` | `436590` (Connecteam) | `GET /business/{id}/location` |
-| employing entity | none (single-entity) | `GET /business/{id}/employingentity` |
 | `CT_ONBOARDING_PACK_ID` | `5474` | `GET /onboarding/v1/packs` |
+| employing entity | none (single-entity) | `GET /business/{id}/employingentity` |
+
+Pay schedule and location are **not** deployment vars. If a flat-rate workforce
+opts into `employmentHero.defaults` (issue #26), the schedule and location go
+there **by name**; `GET /business/{id}/payschedule` and
+`GET /business/{id}/location` list the names. `field-map.json` also keeps the
+numeric `payScheduleId` / `locationId` as optional reference — `discover.ts`
+fills them in but nothing reads them.
 
 ## Mapping
 

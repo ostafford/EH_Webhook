@@ -139,8 +139,11 @@ Connecteam when the webhook is registered (step 5). → **`CT_WEBHOOK_SECRET`**
    the setup email would confuse employees.
 3. The structural IDs are discovered for you in the next step:
    - `businessId` — `GET /api/v2/business` → **`EH_BUSINESS_ID`**
-   - pay schedule ID — `GET /business/{id}/payschedule` → **`EH_PAY_SCHEDULE_ID`**
-   - location ID — `GET /business/{id}/location` → **`EH_LOCATION_ID`**
+
+   Pay schedule and location are no longer deployment vars (issue #26). A
+   flat-rate workforce that opts into `employmentHero.defaults` names them there
+   instead; otherwise every record lands `Incomplete` on the pay-run axis and a
+   payroll admin finishes it by hand, unchanged.
 
 ---
 
@@ -195,8 +198,8 @@ npx wrangler secret put EH_API_KEY
 npx wrangler secret put CT_WEBHOOK_SECRET
 
 # Vars — set in wrangler.jsonc "vars" (leave FIELD_MAP_CLIENT blank):
-#   EH_BUSINESS_ID, EH_PAY_SCHEDULE_ID, EH_LOCATION_ID,
-#   CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID, ADMIN_CONNECTEAM_CHANNEL_ID
+#   EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID,
+#   ADMIN_CONNECTEAM_CHANNEL_ID
 
 # Verify, then deploy
 npm run typecheck && npm test
