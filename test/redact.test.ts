@@ -13,6 +13,11 @@ describe("isSensitiveKey", () => {
     "superFund1_MemberNumber",
     "memberNumber",
     "BSB",
+    "rate",
+    "defaultRate",
+    "default_rate",
+    "payRate",
+    "base_rate",
     "password",
     "apiKey",
     "api_key",
@@ -21,7 +26,18 @@ describe("isSensitiveKey", () => {
     "secret",
     "CT_API_KEY",
   ];
-  const safe = ["firstName", "surname", "residentialPostCode", "ctUserId", "status", "jobTitle", "employmentType"];
+  const safe = [
+    "firstName",
+    "surname",
+    "residentialPostCode",
+    "ctUserId",
+    "status",
+    "jobTitle",
+    "employmentType",
+    // rate METADATA carries no dollar amount - must stay readable in logs
+    "rateUnit",
+    "rateType",
+  ];
 
   it.each(sensitive)("flags %s", (k) => expect(isSensitiveKey(k)).toBe(true));
   it.each(safe)("allows %s", (k) => expect(isSensitiveKey(k)).toBe(false));

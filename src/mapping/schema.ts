@@ -25,6 +25,8 @@ const transform = z.enum([
   "digits",
   "zeroPad4",
   "zeroPad6",
+  /** Non-negative JSON number, e.g. a `hoursPerWeek` custom field (issue #42). */
+  "number",
 ]);
 
 export const fieldRule = z
@@ -117,6 +119,23 @@ export const fieldMap = z
             /** Award name/id (validated against the business). */
             awardId: z.union([z.string().min(1), z.number()]).optional(),
           })
+          .strict()
+          .optional(),
+        /**
+         * Opt-in: source each employee's `rate` + `rateUnit` from the Connecteam
+         * pay-rates API (`GET /pay-rates/v1/pay-rates`) instead of a flat
+         * company-wide `defaults.rate` (issue #42). Present = on; absent = the
+         * record's `rate` stays unset and EH marks it `Incomplete` as before.
+         *
+         * When on, the full pay-run set EH validates all-or-nothing
+         * (`paySchedule` + `primaryLocation` + `primaryPayCategory` from
+         * `defaults`, plus `rate` + `rateUnit` from the API) must resolve for
+         * EVERY employee, or the sync sends no pay-run keys at all and raises one
+         * follow-up naming the employee / the missing config. `hoursPerWeek` is
+         * optional and comes from a per-employee `number` field rule.
+         */
+        perEmployeeRate: z
+          .object({ source: z.literal("connecteamPayRate") })
           .strict()
           .optional(),
       })

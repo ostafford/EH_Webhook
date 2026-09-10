@@ -12,6 +12,7 @@ import {
 } from "../src/sync/consumer.js";
 import type { SyncJob } from "../src/sync/job.js";
 import type { EmployeeLink, EmployeeLinkPatch, SyncGateway, SyncLogEntry } from "../src/sync/gateway.js";
+import type { CtResult, PayRate } from "../src/connecteam/types.js";
 
 const fieldMap = parseFieldMap(
   JSON.parse(
@@ -163,7 +164,7 @@ function deps(over: Partial<SyncDeps> & { now?: () => number } = {}): SyncDeps {
     ct: (over.ct ?? fakeCt(cloneUser())) as unknown as SyncDeps["ct"],
     eh: (over.eh ?? fakeEh()) as unknown as SyncDeps["eh"],
     store: over.store ?? fakeGateway(),
-    fieldMap,
+    fieldMap: over.fieldMap ?? fieldMap,
     adminChannelId: "chan-1",
     now: over.now ?? (() => 1_000_000),
   };
@@ -606,5 +607,90 @@ describe("handleDeadLetter", () => {
     await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 + 61 * 60 * 1000 });
 
     expect(ct.channels).toHaveLength(3);
+  });
+});
+
+describe("runSyncJob - per-employee pay rate (issue #42)", () => {
+  const rateMap = parseFieldMap({
+    ...fieldMap,
+    employmentHero: {
+      businessId: "555455",
+      defaults: {
+        paySchedule: "Weekly",
+        primaryLocation: "Connecteam",
+        primaryPayCategory: "Permanent Ordinary Hours",
+      },
+      perEmployeeRate: { source: "connecteamPayRate" },
+    },
+  });
+
+  const mkCt = (payRate: CtResult<PayRate | null>) => {
+    const calls: Array<{ userId: number; window: { startDate: string; endDate: string } }> = [];
+    const channels: Array<{ id: string; text: string }> = [];
+    const ct = {
+      calls,
+      channels,
+      async getUser() {
+        return { outcome: "ok", data: cloneUser() };
+      },
+      async getPayRate(userId: number, window: { startDate: string; endDate: string }) {
+        calls.push({ userId, window });
+        return payRate;
+      },
+      async sendDirectMessage() {
+        return { outcome: "ok", data: null };
+      },
+      async sendChannelMessage(id: string, text: string) {
+        channels.push({ id, text });
+        return { outcome: "ok", data: null };
+      },
+    };
+    return ct as unknown as SyncDeps["ct"] & { calls: typeof calls; channels: typeof channels };
+  };
+
+  it("looks up the rate for the sync day and folds it into the EH payload", async () => {
+    const ct = mkCt({ outcome: "ok", data: { rateType: "hourly", defaultRate: 40, isDefaultRateEnabled: true } });
+    const eh = fakeEh({ id: 7, created: true });
+    const out = await runSyncJob(
+      job({ eventTimestamp: Date.parse("2026-09-10T09:00:00Z") }),
+      deps({ ct, eh, store: fakeGateway(), fieldMap: rateMap }),
+    );
+
+    expect(ct.calls).toHaveLength(1);
+    expect(ct.calls[0]!.window).toEqual({ startDate: "2026-09-10", endDate: "2026-09-10" });
+    expect(eh.upserts).toHaveLength(1);
+    expect(eh.upserts[0]!.payload.rate).toBe(40);
+    expect(eh.upserts[0]!.payload.rateUnit).toBe("Hourly");
+    expect(eh.upserts[0]!.payload.paySchedule).toBe("Weekly");
+    expect(out.status).toBe("synced");
+  });
+
+  it("no pay rate on file: raises a follow-up to the admin channel and writes nothing to EH", async () => {
+    const ct = mkCt({ outcome: "ok", data: null });
+    const eh = fakeEh();
+    const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: rateMap }));
+
+    expect(eh.upserts).toHaveLength(0);
+    expect(out.status).toBe("follow_up");
+    expect(ct.channels).toHaveLength(1);
+    expect(ct.channels[0]!.text).toMatch(/pay rate/i);
+  });
+
+  it("retries when the pay-rates API is unavailable", async () => {
+    const ct = mkCt({ outcome: "retryable", status: 503, detail: "down" });
+    const out = await runSyncJob(
+      job(),
+      deps({ ct, eh: fakeEh(), store: fakeGateway(), fieldMap: rateMap }),
+    );
+    expect(out.status).toBe("retry");
+  });
+
+  it("does not call the pay-rates API when perEmployeeRate is off", async () => {
+    const ct = mkCt({ outcome: "ok", data: null });
+    await runSyncJob(
+      job(),
+      deps({ ct, eh: fakeEh({ id: 1, created: true }), store: fakeGateway() }),
+    );
+    expect(ct.calls).toHaveLength(0);
   });
 });

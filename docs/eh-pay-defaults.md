@@ -88,14 +88,33 @@ category, rate and rate unit (a lone `paySchedule` is a `400`).
   entry.
 - **Sourcing values from Connecteam "Customizable defaults".** Checked the
   public API (2026-09, `developer.connecteam.com/llms.txt`): **no endpoint
-  exposes it.** The nearest surfaces are `pay_rates/v1` (strictly **per-user**
+  exposes it.** The nearest surfaces are `pay-rates/v1` (strictly **per-user**
   rate: `effectiveDate` + `rateType` `hourly|monthly|yearly` + amount, with
   `useDefaultRate` / `useParentRate` inheritance flags) and
   `company-policies/v1/pay-rule-policies` (GET returns only `{id, name}`; PUT
   only assigns users). Neither carries pay category, award, classification,
   standard hours, pay schedule or location. The "Customizable defaults" screen
   is UI-only. **Conclusion: the field-map `defaults` block stays the only
-  source.** (Separate idea, not #26: the per-user `pay_rates` API *could* feed
-  the genuinely-per-person `rate` into the sync instead of a manual EH entry.)
+  source** for `paySchedule` / `primaryLocation` / `primaryPayCategory`.
+
+## Per-employee `rate` from the Connecteam pay-rates API (issue #42)
+
+Done. `employmentHero.perEmployeeRate: { source: "connecteamPayRate" }` (opt-in)
+makes the sync call `GET /pay-rates/v1/pay-rates?userIds={id}&startDate=&endDate=`
+per employee and fold `rate` + `rateUnit` into the pay-run set, with
+`paySchedule` / `primaryLocation` / `primaryPayCategory` still from `defaults`
+and an optional `hoursPerWeek` from a per-employee `number` field rule. See
+[`adr/0003-source-per-employee-pay-rate-from-connecteam.md`](./adr/0003-source-per-employee-pay-rate-from-connecteam.md).
+
+- `rate` = `defaultRate` (only when `isDefaultRateEnabled`); `resourcesRates[]`
+  overrides are ignored, and logged (`evt: "payrate_resource_overrides"`).
+- `rateType` → `rateUnit`: `hourly` → `Hourly`, `yearly` → `Annually`.
+  **`monthly` is still unverified** — a monthly rate raises a follow-up naming
+  the employee and sends no pay-run keys, until the #45 probe confirms EH's
+  accepted `rateUnit` string for it.
+- **All-or-nothing preserved.** If any required pay-run field can't be resolved
+  for an employee (no pay rate on file, disabled default rate, monthly type,
+  missing `defaults` name), `applyFieldMap` emits **no** pay-run keys and the
+  sync raises one follow-up — EH is never sent a partial set.
 - **`classification` / award classification** — needs a business with awards to
   probe, and likely a `payRateTemplate` rather than a bare field.

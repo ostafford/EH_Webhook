@@ -49,6 +49,13 @@ export interface DecideInput {
    * admin setup - so the follow-up says that instead.
    */
   payRunDefaultsComplete?: boolean;
+  /**
+   * The all-or-nothing pay-run set could not be completed before the write
+   * (issue #42: no Connecteam pay rate, unsupported `rateType`, missing
+   * `defaults` name). The payload carries no pay-run keys, so nothing is sent -
+   * these reasons go straight to the admin channel as one follow-up.
+   */
+  payRunUnresolved?: string[];
 }
 
 const INCOMPLETE = "incomplete";
@@ -113,6 +120,14 @@ export function decide(input: DecideInput): SyncDecision {
   const mappingIssues = input.mappingIssues ?? [];
   if (mappingIssues.length > 0) {
     return { kind: "correction", fields: mappingIssues.map(issueToFieldError) };
+  }
+
+  // Pay-run set could not be completed pre-send (issue #42). Nothing was written;
+  // route the reasons to the admin channel rather than the employee - a pay rate
+  // is admin/config work, not something the employee can fix in their profile.
+  const payRunUnresolved = input.payRunUnresolved ?? [];
+  if (payRunUnresolved.length > 0) {
+    return { kind: "follow_up", reasons: [...payRunUnresolved, ...(input.followUps ?? [])] };
   }
 
   const { write } = input;
