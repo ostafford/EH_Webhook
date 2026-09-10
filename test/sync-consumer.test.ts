@@ -509,6 +509,9 @@ describe("dispatchBatch", () => {
     expect(older1.calls).toEqual(["ack"]);
     expect(older2.calls).toEqual(["ack"]);
     expect(newest.calls).toEqual(["ack"]);
+    // Every message acked here counts toward acked_total, coalesced siblings
+    // included - otherwise /health queueBacklog never drains to 0.
+    expect(store.counters.get("acked_total")).toBe(3);
   });
 
   it("does not coalesce across different users", async () => {

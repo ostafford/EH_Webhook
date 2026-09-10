@@ -218,22 +218,28 @@ export async function dispatchBatch(
 
   // Connecteam fires one `user_updated` delivery per changed field, so a single
   // profile edit arrives as a burst of jobs for the same user in one batch.
-  // Run only the newest per user; ack the rest untouched so they don't each
-  // trigger a sync, a message and a failure-cycle bump. (A burst split across
-  // batches is still deduped by the stale-event guard in runSyncJob once the
-  // first job has written `lastSyncedTs`.)
+  // Run only the newest per user; ack the rest without running a sync, a message
+  // or a failure-cycle bump. They still count toward `acked_total` — every
+  // enqueued message must land in `acked_total` or `dl_total` or the /health
+  // `queueBacklog` gauge (enqueued - acked - dead-lettered) never returns to 0.
+  // (A burst split across batches is still deduped by the stale-event guard in
+  // runSyncJob once the first job has written `lastSyncedTs`.)
+  let acked = 0;
   const newestPerUser = new Map<number, QueueMessageLike<SyncJob>>();
   for (const message of batch.messages) {
     const prev = newestPerUser.get(message.body.ctUserId);
     if (!prev || message.body.eventTimestamp > prev.body.eventTimestamp) {
-      if (prev) prev.ack();
+      if (prev) {
+        prev.ack();
+        acked++;
+      }
       newestPerUser.set(message.body.ctUserId, message);
     } else {
       message.ack();
+      acked++;
     }
   }
 
-  let acked = 0;
   for (const message of newestPerUser.values()) {
     try {
       const outcome = await runSyncJob(message.body, deps);
