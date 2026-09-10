@@ -66,6 +66,31 @@ export function zeroPad(v: unknown, length: number): string {
   return d.padStart(length, "0");
 }
 
+/**
+ * A plain non-negative number (e.g. Employment Hero `hoursPerWeek`). Accepts a
+ * numeric Connecteam value or a numeric string; rejects anything non-finite or
+ * negative. Returns a `number`, not a string - EH's unstructured endpoint takes
+ * `hoursPerWeek` / `rate` as JSON numbers (`docs/eh-pay-defaults.md`).
+ */
+export function decimalNumber(v: unknown): number {
+  let n: number;
+  if (typeof v === "number") {
+    n = v;
+  } else {
+    const s = String(v).trim();
+    // `Number("")` is 0 - treat a blank value as "not a number", not zero.
+    if (s === "") throw new TransformError("expected a number, got a blank value");
+    n = Number(s);
+  }
+  if (!Number.isFinite(n)) {
+    throw new TransformError(`expected a number, got "${String(v)}"`);
+  }
+  if (n < 0) {
+    throw new TransformError(`expected a non-negative number, got ${n}`);
+  }
+  return n;
+}
+
 interface DropdownOption {
   id: number;
   value: string;

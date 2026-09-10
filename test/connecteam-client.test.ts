@@ -80,6 +80,46 @@ describe("ConnecteamClient.getUser", () => {
   });
 });
 
+describe("ConnecteamClient.getPayRate", () => {
+  it("sends the required date window and returns the user's payRate", async () => {
+    const f = fakeFetch({
+      "GET /pay-rates/v1/pay-rates": {
+        status: 200,
+        body: wrap({
+          payRatesByUsers: [
+            { userId: 123, payRate: { rateType: "hourly", defaultRate: 35, isDefaultRateEnabled: true } },
+            { userId: 999, payRate: { rateType: "yearly", defaultRate: 90000, isDefaultRateEnabled: true } },
+          ],
+        }),
+      },
+    });
+    const r = await new ConnecteamClient(cfg(f)).getPayRate(123, { startDate: "2026-09-10", endDate: "2026-09-10" });
+    expect(r).toEqual({
+      outcome: "ok",
+      data: { rateType: "hourly", defaultRate: 35, isDefaultRateEnabled: true },
+    });
+    const [url] = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(String(url)).toBe(
+      "https://ct.test/pay-rates/v1/pay-rates?userIds=123&startDate=2026-09-10&endDate=2026-09-10",
+    );
+  });
+
+  it("returns null when the user has no pay rate on file", async () => {
+    const f = fakeFetch({
+      "GET /pay-rates/v1/pay-rates": { status: 200, body: wrap({ payRatesByUsers: [] }) },
+    });
+    expect(
+      await new ConnecteamClient(cfg(f)).getPayRate(123, { startDate: "2026-09-10", endDate: "2026-09-10" }),
+    ).toEqual({ outcome: "ok", data: null });
+  });
+
+  it("classifies a 503 as retryable", async () => {
+    const f = fakeFetch({ "GET /pay-rates/v1/pay-rates": { status: 503, body: "down" } });
+    const r = await new ConnecteamClient(cfg(f)).getPayRate(123, { startDate: "2026-09-10", endDate: "2026-09-10" });
+    expect(r.outcome).toBe("retryable");
+  });
+});
+
 describe("ConnecteamClient messaging", () => {
   it("DMs a user as the custom publisher", async () => {
     const f = fakeFetch({ "POST /chat/v1/conversations/privateMessage/55": { status: 200, body: wrap({}) } });

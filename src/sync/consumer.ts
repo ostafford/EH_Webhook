@@ -14,6 +14,7 @@ import type { SyncJob } from "./job.js";
 import type { FieldMap } from "../mapping/schema.js";
 import { applyFieldMap, type ConnecteamUser as MappingUser } from "../mapping/apply.js";
 import type { ConnecteamClient } from "../connecteam/client.js";
+import type { PayRate } from "../connecteam/types.js";
 import type { EhPayrollClient } from "../eh/client.js";
 import { decide, compareReadBack, auditDetail, type SyncDecision, type ReadBackResult } from "./decide.js";
 import {
@@ -25,6 +26,7 @@ import {
 } from "./messages.js";
 import { advanceCycle, directManagerUserId } from "./cycles.js";
 import { payloadHash } from "./canonical.js";
+import { logEvent } from "../log.js";
 import {
   noticeKey,
   shouldPostNotice,
@@ -34,7 +36,10 @@ import {
 import type { SyncGateway, SyncOutcomeLabel } from "./gateway.js";
 
 export interface SyncDeps {
-  ct: Pick<ConnecteamClient, "getUser" | "sendDirectMessage" | "sendChannelMessage">;
+  ct: Pick<
+    ConnecteamClient,
+    "getUser" | "getPayRate" | "sendDirectMessage" | "sendChannelMessage"
+  >;
   eh: Pick<EhPayrollClient, "upsertByExternalId" | "getByExternalId">;
   store: SyncGateway;
   fieldMap: FieldMap;
@@ -77,7 +82,36 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   if (userRes.data === null) return { status: "skipped", reason: "connecteam user no longer exists" };
   const user = userRes.data;
 
-  const mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap);
+  // Per-employee pay rate (issue #42): only when the client opted in via
+  // `employmentHero.perEmployeeRate`. `applyFieldMap` is pure, so the network
+  // call happens here and the result is passed in.
+  let payRate: PayRate | null | undefined;
+  if (deps.fieldMap.employmentHero.perEmployeeRate) {
+    // Ask for the rate effective on the event date. The API returns one
+    // `payRate` per user for the window; a same-day window = "the rate that
+    // applies now". (Widen this if the live API rejects start == end.)
+    const day = new Date(eventTimestamp).toISOString().slice(0, 10);
+    const rateRes = await deps.ct.getPayRate(ctUserId, { startDate: day, endDate: day });
+    if (rateRes.outcome === "retryable") {
+      return { status: "retry", reason: `connecteam pay-rates unavailable: ${rateRes.detail}` };
+    }
+    if (rateRes.outcome === "error") {
+      return { status: "retry", reason: `connecteam pay-rates error ${rateRes.status}` };
+    }
+    payRate = rateRes.data;
+    if (payRate && Array.isArray(payRate.resourcesRates) && payRate.resourcesRates.length > 0) {
+      // Per-resource overrides don't map to EH's single `rate` - we use
+      // `defaultRate` and just note that overrides exist (redact drops values).
+      logEvent({
+        evt: "payrate_resource_overrides",
+        ctUserId,
+        rateType: payRate.rateType,
+        overrides: payRate.resourcesRates.length,
+      });
+    }
+  }
+
+  const mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap, { payRate });
   const hash = await payloadHash(mapped.payload);
 
   // Identical to the state we last processed. Connecteam fires one webhook per
@@ -96,6 +130,10 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   if (mapped.issues.length > 0) {
     // The payload never leaves the Worker - the employee must fix it first.
     decision = decide({ mappingIssues: mapped.issues });
+  } else if (mapped.payRunIssues.length > 0) {
+    // Pay-run set could not be completed (issue #42). EH 400s a partial set, so
+    // nothing is sent; the reasons go to the admin channel as one follow-up.
+    decision = decide({ payRunUnresolved: mapped.payRunIssues, followUps: mapped.followUps });
   } else {
     // Match order: stored link -> externalId (both handled by upsertByExternalId).
     // Email fallback for the very first match is deferred - it needs an EH

@@ -91,6 +91,9 @@ const KNOWN: Known[] = [
   { match: /name on bank account/i, eh: "bankAccount1_AccountName", transform: "trimString", sensitive: true },
   { match: /^bsb/i, eh: "bankAccount1_BSB", transform: "zeroPad6", sensitive: true },
   { match: /account number/i, eh: "bankAccount1_AccountNumber", transform: "digits", sensitive: true },
+  // Optional, per issue #42 - only used when the client also sets
+  // employmentHero.perEmployeeRate. Harmless if the field doesn't exist.
+  { match: /standard hours.*week|hours per week|weekly hours/i, eh: "hoursPerWeek", transform: "number" },
 ];
 
 const TAX_DECLARATION: Array<{ match: RegExp; key: string }> = [

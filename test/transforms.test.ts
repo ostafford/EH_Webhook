@@ -11,6 +11,7 @@ import {
   phoneAu,
   mapEnum,
   yesNo,
+  decimalNumber,
 } from "../src/mapping/transforms.js";
 
 describe("trimString / lowerTrim", () => {
@@ -137,5 +138,20 @@ describe("yesNo", () => {
   it("rejects anything else", () => {
     expect(() => yesNo("maybe")).toThrow(TransformError);
     expect(() => yesNo([])).toThrow(TransformError);
+  });
+});
+
+describe("decimalNumber", () => {
+  it("accepts a number or a numeric string, keeping the numeric type", () => {
+    expect(decimalNumber(38)).toBe(38);
+    expect(decimalNumber("38")).toBe(38);
+    expect(decimalNumber(" 7.6 ")).toBe(7.6);
+    expect(decimalNumber(0)).toBe(0);
+  });
+  it("rejects non-numbers and negatives", () => {
+    expect(() => decimalNumber("full-time")).toThrow(TransformError);
+    expect(() => decimalNumber("")).toThrow(TransformError);
+    expect(() => decimalNumber(-1)).toThrow(TransformError);
+    expect(() => decimalNumber(null)).toThrow(TransformError);
   });
 });

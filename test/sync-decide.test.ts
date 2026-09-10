@@ -29,6 +29,29 @@ describe("decide", () => {
     });
   });
 
+  it("an unresolved pay-run set (issue #42) becomes a follow_up, before any write", () => {
+    const d = decide({
+      payRunUnresolved: ["This employee has no pay rate set in Connecteam."],
+      followUps: ["Self-managed super fund - add it by hand."],
+      write: okWrite(), // present but must be ignored - nothing was sent
+    });
+    expect(d).toEqual({
+      kind: "follow_up",
+      reasons: [
+        "This employee has no pay rate set in Connecteam.",
+        "Self-managed super fund - add it by hand.",
+      ],
+    });
+  });
+
+  it("mapping issues still win over an unresolved pay-run set", () => {
+    const d = decide({
+      mappingIssues: [{ ehField: "surname", source: "x", reason: "required value is missing or blank" }],
+      payRunUnresolved: ["no pay rate"],
+    });
+    expect(d.kind).toBe("correction");
+  });
+
   it("an EH 400 validation failure becomes a correction carrying the field errors", () => {
     const write: EhResult<EhWriteResult> = {
       outcome: "validation",

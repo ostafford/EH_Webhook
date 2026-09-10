@@ -9,7 +9,7 @@
  * `console` output.
  */
 const SENSITIVE_KEY =
-  /(^|_)(tfn|tax_?file_?number|bsb|account_?number|account_?name|bank_?account|member_?number|routing|iban|sort_?code|password|secret|api_?key|apikey|authorization|auth_?token|token|bearer|cookie)($|_|[0-9])/i;
+  /(^|_)(tfn|tax_?file_?number|bsb|account_?number|account_?name|bank_?account|member_?number|routing|iban|sort_?code|rate|default_?rate|pay_?rate|base_?rate|password|secret|api_?key|apikey|authorization|auth_?token|token|bearer|cookie)($|_|[0-9])/i;
 
 const REDACTED = "[redacted]";
 const MAX_DEPTH = 6;

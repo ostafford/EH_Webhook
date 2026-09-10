@@ -112,6 +112,134 @@ describe("applyFieldMap - employmentHero.defaults (issues #26, #34)", () => {
   });
 });
 
+describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
+  const withRate = (defaultsOver: Record<string, unknown> = {}) =>
+    parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: {
+          paySchedule: "Weekly",
+          primaryLocation: "Connecteam",
+          primaryPayCategory: "Permanent Ordinary Hours",
+          ...defaultsOver,
+        },
+        perEmployeeRate: { source: "connecteamPayRate" },
+      },
+    });
+
+  const hourly = { rateType: "hourly", defaultRate: 35, isDefaultRateEnabled: true };
+
+  it("completes the pay-run set from defaults + the Connecteam pay rate", () => {
+    const r = applyFieldMap(clone(), withRate(), { payRate: hourly });
+    expect(r.payRunIssues).toEqual([]);
+    expect(r.payRunDefaultsComplete).toBe(true);
+    expect(r.payload.paySchedule).toBe("Weekly");
+    expect(r.payload.primaryLocation).toBe("Connecteam");
+    expect(r.payload.primaryPayCategory).toBe("Permanent Ordinary Hours");
+    expect(r.payload.rate).toBe(35);
+    expect(r.payload.rateUnit).toBe("Hourly");
+  });
+
+  it("maps rateType yearly -> Annually", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: { rateType: "yearly", defaultRate: 92000, isDefaultRateEnabled: true },
+    });
+    expect(r.payload.rate).toBe(92000);
+    expect(r.payload.rateUnit).toBe("Annually");
+    expect(r.payRunDefaultsComplete).toBe(true);
+  });
+
+  it("no pay rate on file -> follow-up, and NOT one pay-run key on the payload", () => {
+    const r = applyFieldMap(clone(), withRate(), { payRate: null });
+    expect(r.payRunIssues).toHaveLength(1);
+    expect(r.payRunIssues[0]).toMatch(/no pay rate/i);
+    expect(r.payRunDefaultsComplete).toBe(false);
+    expect(r.issues).toEqual([]); // admin/config, not an employee-facing correction
+    for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory", "rate", "rateUnit"]) {
+      expect(r.payload[k as keyof typeof r.payload]).toBeUndefined();
+    }
+  });
+
+  it("rejects a monthly rate until EH's rateUnit value is confirmed (issue #45)", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: { rateType: "monthly", defaultRate: 8000, isDefaultRateEnabled: true },
+    });
+    expect(r.payRunIssues[0]).toMatch(/monthly/i);
+    expect(r.payload.rate).toBeUndefined();
+    expect(r.payload.rateUnit).toBeUndefined();
+    expect(r.payload.paySchedule).toBeUndefined();
+  });
+
+  it("rejects a disabled default rate", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: { rateType: "hourly", defaultRate: 35, isDefaultRateEnabled: false },
+    });
+    expect(r.payRunIssues[0]).toMatch(/turned off/i);
+    expect(r.payload.rate).toBeUndefined();
+  });
+
+  it("rejects a zero / missing rate value", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: { rateType: "hourly", defaultRate: 0, isDefaultRateEnabled: true },
+    });
+    expect(r.payRunIssues[0]).toMatch(/zero or missing/i);
+  });
+
+  it("names a missing company-wide default - the set stays all-or-nothing", () => {
+    const map2 = parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: { paySchedule: "Weekly", primaryLocation: "Connecteam" }, // no primaryPayCategory
+        perEmployeeRate: { source: "connecteamPayRate" },
+      },
+    });
+    const r = applyFieldMap(clone(), map2, { payRate: hourly });
+    expect(r.payRunIssues.some((s) => s.includes("primaryPayCategory"))).toBe(true);
+    expect(r.payload.rate).toBeUndefined();
+    expect(r.payload.paySchedule).toBeUndefined();
+  });
+
+  it("carries a per-employee hoursPerWeek number field, and strips it when the set fails", () => {
+    const HOURS_CF = 90000001;
+    const mapH = parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: {
+          paySchedule: "Weekly",
+          primaryLocation: "Connecteam",
+          primaryPayCategory: "Permanent Ordinary Hours",
+        },
+        perEmployeeRate: { source: "connecteamPayRate" },
+      },
+      fields: [
+        ...map.fields,
+        { eh: "hoursPerWeek", from: { customFieldId: HOURS_CF }, transform: "number" },
+      ],
+    });
+    const withHours = () => {
+      const u = clone();
+      u.customFields.push({ customFieldId: HOURS_CF, type: "str", name: "Standard hours/week", value: "38" });
+      return u;
+    };
+
+    const ok = applyFieldMap(withHours(), mapH, { payRate: hourly });
+    expect(ok.payload.hoursPerWeek).toBe(38);
+    expect(ok.payRunDefaultsComplete).toBe(true);
+
+    const bad = applyFieldMap(withHours(), mapH, { payRate: null });
+    expect(bad.payload.hoursPerWeek).toBeUndefined();
+  });
+
+  it("without perEmployeeRate, a passed payRate is ignored (unchanged behaviour)", () => {
+    const r = applyFieldMap(clone(), map, { payRate: hourly });
+    expect(r.payload.rate).toBeUndefined();
+    expect(r.payRunIssues).toEqual([]);
+  });
+});
+
 describe("applyFieldMap - happy path", () => {
   const { payload, issues, externalId, emailFallback, followUps } = applyFieldMap(clone(), map);
 

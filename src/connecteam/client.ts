@@ -5,6 +5,7 @@
  * Verified against the live API (issue #3):
  *  - GET  /users/v1/users?userIds={id}                     (no single-user GET)
  *  - GET  /onboarding/v1/packs/{packId}/assignments
+ *  - GET  /pay-rates/v1/pay-rates?userIds={id}&startDate=&endDate=  (dates required)
  *  - GET  /chat/v1/conversations
  *  - POST /chat/v1/conversations/privateMessage/{userId}   body { senderId, text }
  *  - POST /chat/v1/conversations/{conversationId}/message  body { senderId, text }
@@ -16,6 +17,7 @@ import type {
   CtResult,
   OnboardingAssignment,
   ConnecteamUser,
+  PayRate,
   RateLimit,
 } from "./types.js";
 
@@ -65,6 +67,28 @@ export class ConnecteamClient {
     return unwrap(r, (b) => {
       const users = (b as Wrapped<{ users: ConnecteamUser[] }>).data.users;
       return users.find((u) => u.userId === userId) ?? null;
+    });
+  }
+
+  /**
+   * One user's effective pay rate for a date window (issue #42). `startDate` /
+   * `endDate` are `YYYY-MM-DD` and both required - the API 400s without them.
+   * Returns `null` when the user has no pay rate on file.
+   */
+  async getPayRate(
+    userId: number,
+    window: { startDate: string; endDate: string },
+  ): Promise<CtResult<PayRate | null>> {
+    const qs =
+      `userIds=${userId}` +
+      `&startDate=${encodeURIComponent(window.startDate)}` +
+      `&endDate=${encodeURIComponent(window.endDate)}`;
+    const r = await this.#call("GET", `/pay-rates/v1/pay-rates?${qs}`);
+    return unwrap(r, (b) => {
+      const rows =
+        (b as Wrapped<{ payRatesByUsers?: Array<{ userId: number; payRate?: PayRate }> }>).data
+          .payRatesByUsers ?? [];
+      return rows.find((x) => x.userId === userId)?.payRate ?? null;
     });
   }
 
