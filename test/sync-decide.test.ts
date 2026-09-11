@@ -108,10 +108,21 @@ describe("decide", () => {
     expect(reason).not.toContain("a payroll admin needs to finish");
   });
 
-  it("keeps the plain admin follow-up when defaults are complete but EH flags award (not covered by defaults)", () => {
+  it("re-routes an award/classification flag to a field-map fix when the pay-run set (award path) is complete (issue #39)", () => {
     const d = decide({
       write: okWrite({ status: "Incomplete", detailedStatus: "Award classification is incomplete" }),
       payRunDefaultsComplete: true,
+    });
+    expect(d.kind).toBe("follow_up");
+    const [reason] = (d as { reasons: string[] }).reasons;
+    expect(reason).toContain("do not match this business");
+    expect(reason).not.toContain("a payroll admin needs to finish");
+  });
+
+  it("keeps the plain admin follow-up for an award flag when the pay-run set is NOT complete", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Award classification is incomplete" }),
+      payRunDefaultsComplete: false,
     });
     expect(d.kind).toBe("follow_up");
     expect((d as { reasons: string[] }).reasons[0]).toContain("a payroll admin needs to finish");
