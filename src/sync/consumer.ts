@@ -196,17 +196,21 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
 
   // Store the hash on every terminal outcome so an identical re-delivery is
   // skipped above. A genuine later edit changes the mapped payload -> new hash
-  // -> it is processed again.
+  // -> it is processed again. `lastOutcome` is what the daily recheck pass
+  // (#43) uses to find every employee stuck on a Manual-follow-up without
+  // scanning sync_log.
+  const outcome = outcomeLabel(decision);
   await deps.store.saveEmployeeLink({
     ctUserId,
     ehEmployeeId: ehEmployeeId ?? null,
     lastSyncedTs: eventTimestamp,
     lastPayloadHash: hash,
+    lastOutcome: outcome,
   });
   await deps.store.appendSyncLog({
     ctUserId,
     at: now(),
-    outcome: outcomeLabel(decision),
+    outcome,
     detail: auditDetail(decision),
   });
 
