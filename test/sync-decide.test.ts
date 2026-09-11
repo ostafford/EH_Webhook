@@ -137,6 +137,30 @@ describe("decide", () => {
     expect((d as { reasons: string[] }).reasons[0]).toContain("a payroll admin needs to finish");
   });
 
+  // Issue #45: axes an EMPLOYEE fills. EH returns these as `detailedStatus` on a
+  // 2xx Incomplete write; they must route to a correction, not the admin channel.
+  it("routes 'Basic Details are incomplete' to an employee correction (issue #45)", () => {
+    const d = decide({
+      write: okWrite({
+        status: "Incomplete",
+        detailedStatus:
+          "Basic Details are incomplete. If an employee is onboarding via Self Setup, they will receive a notification prompting them to complete their details",
+      }),
+    });
+    expect(d.kind).toBe("correction");
+    const [f1] = (d as { fields: { field: string }[] }).fields;
+    expect(f1?.field).toBe("(incomplete)");
+  });
+
+  it("routes 'Bank Accounts are incomplete' to an employee correction (issue #45)", () => {
+    const d = decide({
+      write: okWrite({ status: "Incomplete", detailedStatus: "Bank Accounts are incomplete" }),
+    });
+    expect(d.kind).toBe("correction");
+    const [f1] = (d as { fields: { reason: string }[] }).fields;
+    expect(f1?.reason).toBe("Bank Accounts are incomplete");
+  });
+
   it("a read-back mismatch on a clean-status write becomes a correction", () => {
     const d = decide({
       write: okWrite(),
