@@ -161,11 +161,21 @@ describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
     }
   });
 
-  it("rejects a monthly rate until EH's rateUnit value is confirmed (issue #45)", () => {
+  it("maps rateType monthly -> Monthly (confirmed 2026-09-11, docs/eh-pay-defaults.md)", () => {
     const r = applyFieldMap(clone(), withRate(), {
       payRate: { rateType: "monthly", defaultRate: 8000, isDefaultRateEnabled: true },
     });
-    expect(r.payRunIssues[0]).toMatch(/monthly/i);
+    expect(r.payload.rate).toBe(8000);
+    expect(r.payload.rateUnit).toBe("Monthly");
+    expect(r.payRunDefaultsComplete).toBe(true);
+    expect(r.payRunIssues).toEqual([]);
+  });
+
+  it("rejects an unmapped rateType", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: { rateType: "fortnightly", defaultRate: 1500, isDefaultRateEnabled: true },
+    });
+    expect(r.payRunIssues[0]).toMatch(/fortnightly/i);
     expect(r.payload.rate).toBeUndefined();
     expect(r.payload.rateUnit).toBeUndefined();
     expect(r.payload.paySchedule).toBeUndefined();

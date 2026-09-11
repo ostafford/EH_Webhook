@@ -40,7 +40,7 @@ export interface Conversation {
  */
 export interface PayRate {
   effectiveDate?: string;
-  /** "hourly" | "monthly" | "yearly" (only hourly / yearly map to EH so far). */
+  /** "hourly" | "monthly" | "yearly" - all three map to an EH `rateUnit`. */
   rateType: string;
   defaultRate: number;
   isDefaultRateEnabled: boolean;

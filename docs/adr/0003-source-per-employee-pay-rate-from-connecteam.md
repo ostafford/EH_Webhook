@@ -35,8 +35,9 @@ sent, record stays `Incomplete`).
   the consumer logs (`evt: "payrate_resource_overrides"`, no value) when any
   exist, so we learn if a real client depends on them.
 - `rateType` → `rateUnit`: `hourly` → `Hourly`, `yearly` → `Annually`. `monthly`
-  is **not** mapped — EH's accepted value for it is unconfirmed (issue #45); a
-  monthly rate produces one follow-up naming the employee and no partial write.
+  was **not** mapped at the time of this decision — EH's accepted value for it
+  was unconfirmed (issue #45); a monthly rate produced one follow-up naming the
+  employee and no partial write. **Now mapped, see Update below.**
 - `paySchedule` / `primaryLocation` / `primaryPayCategory` still come from
   `employmentHero.defaults` (company-wide). `hoursPerWeek` is optional and comes
   from a per-employee `number` field rule.
@@ -56,9 +57,10 @@ sent, record stays `Incomplete`).
 - **Company-wide flat `defaults.rate` only** (issue #26, unchanged): still
   available, still the right answer for a genuinely single-rate workforce. This
   ADR adds the per-person path alongside it.
-- **Assume `"Monthly"` for a monthly `rateType`**: rejected. An unverified
-  `rateUnit` string risks a 400 on the whole set, blocking the employee. A
-  follow-up until #45 confirms is safe and visible.
+- **Assume `"Monthly"` for a monthly `rateType`** (at the time this ADR was
+  written): rejected then. An unverified `rateUnit` string risks a 400 on the
+  whole set, blocking the employee. A follow-up until #45 confirmed the value
+  was safe and visible — now confirmed, see Update below.
 
 ## Consequences
 
@@ -66,8 +68,20 @@ sent, record stays `Incomplete`).
   within the 200/min, 20,000/day budget the sweep already tracks.
 - `redact.ts` now treats `rate` / `defaultRate` / `payRate` / `baseRate` as
   sensitive keys; `rateUnit` / `rateType` stay readable in logs.
-- A monthly-paid employee cannot be auto-completed until #45. A workforce that is
-  entirely monthly gets no benefit from this feature yet.
+- A monthly-paid employee could not be auto-completed until #45 confirmed EH's
+  `rateUnit` value for it (see Update below).
 - `field-map.json` schema gains a `number` transform and the `perEmployeeRate`
   block. `applyFieldMap` gains an `opts.payRate` argument but stays pure — the
   network call lives in the queue consumer.
+
+## Update 2026-09-11
+
+`rateUnit: "Monthly"` confirmed accepted and persisted by EH's unstructured
+endpoint (`scripts/probe-eh-pay-defaults.sh --rate-unit Monthly`, `201`, reads
+back verbatim). `RATE_UNIT_BY_TYPE` now maps `monthly` → `Monthly` alongside
+`hourly` → `Hourly` and `yearly` → `Annually`; all three `rateType` values
+Connecteam returns are supported. Only a genuinely unmapped `rateType` (e.g.
+`fortnightly`, which Connecteam's pay-rates API does not return today) still
+raises a follow-up. One EH-side quirk noted: a sent `rate` can read back with a
+tiny float difference (`6500` → `6499.99931`) — an internal rounding artefact on
+EH's side, not something the sync can avoid; harmless for payroll purposes.
