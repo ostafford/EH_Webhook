@@ -79,11 +79,13 @@ export interface ApplyOptions {
   payRate?: PayRateInput | null | undefined;
 }
 
-/** Connecteam `rateType` -> EH `rateUnit`. `monthly` is intentionally absent -
- * EH's accepted value for it is unconfirmed (issue #45). */
+/** Connecteam `rateType` -> EH `rateUnit`. `rateUnit: "Monthly"` confirmed
+ * accepted and persisted against the live unstructured endpoint - probed
+ * 2026-09-11, `docs/eh-pay-defaults.md`. */
 const RATE_UNIT_BY_TYPE: Record<string, string> = {
   hourly: "Hourly",
   yearly: "Annually",
+  monthly: "Monthly",
 };
 
 /**
@@ -300,9 +302,8 @@ function resolvePerEmployeeRate(
     return {
       issue:
         `Connecteam has this employee on a "${payRate.rateType}" pay rate, which ` +
-        "the sync cannot map to Employment Hero yet (only hourly and yearly are " +
-        "confirmed - see issue #45). Set this employee's rate in Employment Hero " +
-        "by hand for now.",
+        "the sync cannot map to Employment Hero (only hourly, monthly and yearly " +
+        "are supported). Set this employee's rate in Employment Hero by hand for now.",
     };
   }
   const rate = Number(payRate.defaultRate);

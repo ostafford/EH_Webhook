@@ -135,14 +135,17 @@ and an optional `hoursPerWeek` from a per-employee `number` field rule. See
 
 - `rate` = `defaultRate` (only when `isDefaultRateEnabled`); `resourcesRates[]`
   overrides are ignored, and logged (`evt: "payrate_resource_overrides"`).
-- `rateType` → `rateUnit`: `hourly` → `Hourly`, `yearly` → `Annually`.
-  **`monthly` is still unverified** — a monthly rate raises a follow-up naming
-  the employee and sends no pay-run keys, until the #45 probe confirms EH's
-  accepted `rateUnit` string for it.
+- `rateType` → `rateUnit`: `hourly` → `Hourly`, `yearly` → `Annually`, `monthly`
+  → `Monthly` — **confirmed 2026-09-11** (`scripts/probe-eh-pay-defaults.sh
+  --rate-unit Monthly`): `201`, `rateUnit: "Monthly"` persists on read-back. Any
+  other `rateType` (e.g. `fortnightly`) still raises a follow-up naming the
+  employee and sends no pay-run keys. One quirk found: EH read back `6500` sent
+  as `6499.99931` — an internal rounding artefact on its side (likely a
+  weekly/annual-equivalent conversion), not something the sync can avoid.
 - **All-or-nothing preserved.** If any required pay-run field can't be resolved
-  for an employee (no pay rate on file, disabled default rate, monthly type,
-  missing `defaults` name), `applyFieldMap` emits **no** pay-run keys and the
-  sync raises one follow-up — EH is never sent a partial set.
+  for an employee (no pay rate on file, disabled default rate, an unmapped
+  `rateType`, missing `defaults` name), `applyFieldMap` emits **no** pay-run keys
+  and the sync raises one follow-up — EH is never sent a partial set.
 - **`classification` / award classification** — resolved by #39 (probed
   2026-09-10 against `awardId: 1`). The accepted key is **`payRateTemplate`**,
   the template **name** (which encodes classification + level + age +
