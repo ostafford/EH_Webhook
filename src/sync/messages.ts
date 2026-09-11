@@ -121,6 +121,11 @@ export function followUpNoticeMessage(reasons: string[], ref: PersonRef): string
   return clamp(body);
 }
 
+/** Resolved notice -> the admin channel, when the daily recheck (#43) finds a follow-up now Complete in EH. */
+export function resolvedNoticeMessage(ref: PersonRef, status: string): string {
+  return clamp(`✅ ${personLabel(ref)} is now ${status} in Employment Hero - no more action needed.`);
+}
+
 /** System alert -> the admin channel, when a queue message dead-letters. */
 export function systemAlertMessage(detail: string, ref: PersonRef): string {
   const body = [

@@ -6,6 +6,9 @@
  */
 import type { CycleStore } from "./cycles.js";
 
+/** Matches the `sync_log.outcome` enum in {@link ../db/schema}. */
+export type SyncOutcomeLabel = "ok" | "correction" | "follow_up" | "retry" | "dead_letter" | "resolved";
+
 /** One row of `employee_map`, as the consumer reads it. */
 export interface EmployeeLink {
   ctUserId: number;
@@ -13,6 +16,8 @@ export interface EmployeeLink {
   lastSyncedTs: number | null;
   failureCycleCount: number;
   lastPayloadHash: string | null;
+  /** The outcome of the most recent attempt, or undefined if not tracked by this store. */
+  lastOutcome?: SyncOutcomeLabel | null;
 }
 
 /** Values written back to `employee_map` after an attempt. */
@@ -25,10 +30,9 @@ export interface EmployeeLinkPatch {
    * re-delivery is skipped. A real later edit changes the payload and its hash.
    */
   lastPayloadHash: string | null;
+  /** The outcome of this attempt (issue #43); optional so existing callers still compile. */
+  lastOutcome?: SyncOutcomeLabel | null;
 }
-
-/** Matches the `sync_log.outcome` enum in {@link ../db/schema}. */
-export type SyncOutcomeLabel = "ok" | "correction" | "follow_up" | "retry" | "dead_letter";
 
 export interface SyncLogEntry {
   ctUserId: number;
@@ -48,4 +52,15 @@ export interface SyncGateway extends CycleStore {
   readMeta(keys: string[]): Promise<Record<string, number>>;
   /** Set a `sync_meta` marker to an absolute value (e.g. a "notice last sent" ms). */
   setMarker(key: string, value: number): Promise<void>;
+}
+
+/**
+ * The narrow surface the daily recheck pass (issue #43) needs. A separate
+ * interface (not folded into {@link SyncGateway}) so adding it doesn't force
+ * every existing fake gateway in the sync-consumer tests to grow a new method.
+ */
+export interface RecheckGateway
+  extends Pick<SyncGateway, "appendSyncLog" | "saveEmployeeLink" | "readMeta" | "setMarker"> {
+  /** Every `employee_map` row whose last attempt ended in a Manual-follow-up. */
+  listFollowUpLinks(): Promise<EmployeeLink[]>;
 }

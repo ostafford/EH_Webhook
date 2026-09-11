@@ -7,6 +7,7 @@ import { ConnecteamClient } from "./connecteam/client.js";
 import { SyncStore } from "./db/store.js";
 import { dispatchBatch, type SyncDeps } from "./sync/consumer.js";
 import { runSweep } from "./cron/sweep.js";
+import { runRecheck } from "./cron/recheck.js";
 import { handleWebhook } from "./webhook/inbound.js";
 import { DEFAULT_SCHEME } from "./connecteam/signature.js";
 import { logEvent } from "./log.js";
@@ -114,6 +115,29 @@ async function maybePushHealth(env: Env, store: SyncStore): Promise<void> {
   });
 }
 
+/** Once a day, re-check every employee stuck on a Manual-follow-up (issue #43). */
+const RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function maybeRunRecheck(
+  env: Env,
+  store: SyncStore,
+  ct: ConnecteamClient,
+  sweepStatus: "ok" | "skipped" | "retry",
+): Promise<void> {
+  // "retry" = Connecteam itself is unavailable this tick; "skipped" = the sweep
+  // deferred approvals under rate pressure. Either way, yield this tick to the
+  // sweep and try again next minute - no marker is set, so nothing is lost.
+  if (sweepStatus !== "ok") return;
+
+  const last = (await store.readMeta(["last_recheck_at"])).last_recheck_at ?? 0;
+  if (Date.now() - last < RECHECK_INTERVAL_MS) return;
+
+  const eh = new EhPayrollClient({ apiKey: env.EH_API_KEY, businessId: env.EH_BUSINESS_ID });
+  const result = await runRecheck({ eh, ct, store, adminChannelId: env.ADMIN_CONNECTEAM_CHANNEL_ID });
+  await store.setMarker("last_recheck_at", Date.now());
+  logEvent({ evt: "recheck", ...result });
+}
+
 export default {
   fetch: app.fetch,
 
@@ -152,6 +176,7 @@ export default {
     }
     logEvent({ evt: "sweep", ...result });
 
+    await maybeRunRecheck(env, store, ct, result.status);
     await maybePushHealth(env, store);
   },
 } satisfies ExportedHandler<Env, SyncJob>;

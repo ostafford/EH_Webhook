@@ -4,7 +4,7 @@
  * unit tests use a fake gateway instead.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { employeeMap, onboardingState, syncLog, syncMeta } from "./schema.js";
 import type {
   EmployeeLink,
@@ -35,11 +35,13 @@ export class SyncStore implements SyncGateway {
       lastSyncedTs: row.lastSyncedTs,
       failureCycleCount: row.failureCycleCount,
       lastPayloadHash: row.lastPayloadHash,
+      lastOutcome: row.lastOutcome,
     };
   }
 
   async saveEmployeeLink(patch: EmployeeLinkPatch): Promise<void> {
     const now = Date.now();
+    const lastOutcome = patch.lastOutcome ?? null;
     await this.#db
       .insert(employeeMap)
       .values({
@@ -47,6 +49,7 @@ export class SyncStore implements SyncGateway {
         ehEmployeeId: patch.ehEmployeeId,
         lastSyncedTs: patch.lastSyncedTs,
         lastPayloadHash: patch.lastPayloadHash,
+        lastOutcome,
         updatedAt: now,
       })
       .onConflictDoUpdate({
@@ -55,9 +58,28 @@ export class SyncStore implements SyncGateway {
           ehEmployeeId: patch.ehEmployeeId,
           lastSyncedTs: patch.lastSyncedTs,
           lastPayloadHash: patch.lastPayloadHash,
+          lastOutcome,
           updatedAt: now,
         },
       });
+  }
+
+  // --- daily EH-status recheck pass (issue #43) ---
+
+  /** Every `employee_map` row whose last attempt ended in a Manual-follow-up. */
+  async listFollowUpLinks(): Promise<EmployeeLink[]> {
+    const rows = await this.#db
+      .select()
+      .from(employeeMap)
+      .where(and(eq(employeeMap.lastOutcome, "follow_up"), isNotNull(employeeMap.ehEmployeeId)));
+    return rows.map((row) => ({
+      ctUserId: row.ctUserId,
+      ehEmployeeId: row.ehEmployeeId,
+      lastSyncedTs: row.lastSyncedTs,
+      failureCycleCount: row.failureCycleCount,
+      lastPayloadHash: row.lastPayloadHash,
+      lastOutcome: row.lastOutcome,
+    }));
   }
 
   async getFailureCount(ctUserId: number): Promise<number> {

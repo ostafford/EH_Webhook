@@ -14,6 +14,10 @@ export const employeeMap = sqliteTable("employee_map", {
   failureCycleCount: integer("failure_cycle_count").notNull().default(0),
   /** Hash of the last cleanly-synced mapped payload; NULL after any non-clean outcome. */
   lastPayloadHash: text("last_payload_hash"),
+  /** The `sync_log.outcome` of the most recent attempt - lets the recheck pass (#43) find every follow_up row without scanning sync_log. */
+  lastOutcome: text("last_outcome", {
+    enum: ["ok", "correction", "follow_up", "retry", "dead_letter", "resolved"],
+  }),
   updatedAt: integer("updated_at").notNull(),
 });
 
@@ -38,7 +42,7 @@ export const syncLog = sqliteTable(
     ctUserId: integer("ct_user_id").notNull(),
     at: integer("at").notNull(),
     outcome: text("outcome", {
-      enum: ["ok", "correction", "follow_up", "retry", "dead_letter"],
+      enum: ["ok", "correction", "follow_up", "retry", "dead_letter", "resolved"],
     }).notNull(),
     detail: text("detail"),
   },
