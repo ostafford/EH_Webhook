@@ -99,9 +99,11 @@ export const fieldMap = z
          * verified against the live unstructured endpoint
          * (`docs/eh-pay-defaults.md`): EH takes pay schedule / location / pay
          * category / award BY NAME and validates the set **all-or-nothing** -
-         * a partial set is a 400, so provide the complete working set
-         * (`paySchedule` + `primaryLocation` + `primaryPayCategory` + `rate` +
-         * `rateUnit`, plus optional hours / award) or none of it.
+         * a partial set is a 400, so provide a complete working set - the
+         * "location axis" (`paySchedule` + `primaryLocation` +
+         * `primaryPayCategory`) plus a "rate axis": **either** `rate` +
+         * `rateUnit` **or** `payRateTemplate` (an award classification - EH
+         * derives the rate from it) - plus optional hours / award, or none of it.
          */
         defaults: z
           .object({
@@ -118,6 +120,15 @@ export const fieldMap = z
             hoursPerDay: z.number().positive().optional(),
             /** Award name/id (validated against the business). */
             awardId: z.union([z.string().min(1), z.number()]).optional(),
+            /**
+             * Award pay-rate template, by NAME (issue #39), e.g.
+             * "General Retail Casual L3 21yrs & over". This IS the award
+             * classification. EH fills `rate` + `rateUnit` from it, so it
+             * satisfies the rate axis on its own. Use this for a
+             * single-classification workforce; for a per-employee classification
+             * use `employmentHero.payRateTemplate` + a `fields[]` rule below.
+             */
+            payRateTemplate: z.string().min(1).optional(),
           })
           .strict()
           .optional(),
@@ -138,8 +149,31 @@ export const fieldMap = z
           .object({ source: z.literal("connecteamPayRate") })
           .strict()
           .optional(),
+        /**
+         * Opt-in (issue #39): this client pays under an Employment Hero award and
+         * each employee's classification is a Connecteam field. Add a `fields[]`
+         * rule with `eh: "payRateTemplate"` pointing at that (admin-completed)
+         * Connecteam field - its value is the award pay-rate template NAME, e.g.
+         * "General Retail Casual L3 21yrs & over". EH derives `rate` + `rateUnit`
+         * from the template, so any configured `rate` / `rateUnit` is dropped and
+         * the rate axis is satisfied by the template alone.
+         *
+         * All-or-nothing, like `perEmployeeRate`: the location axis
+         * (`paySchedule` + `primaryLocation` + `primaryPayCategory` from
+         * `defaults`) plus a resolved template must be present for EVERY
+         * employee, or the sync sends no pay-run keys and raises one follow-up.
+         * Mutually exclusive with `perEmployeeRate` (both fill the rate axis).
+         */
+        payRateTemplate: z
+          .object({ source: z.literal("connecteamField") })
+          .strict()
+          .optional(),
       })
-      .strict(),
+      .strict()
+      .refine((eh) => !(eh.perEmployeeRate && eh.payRateTemplate), {
+        message:
+          "perEmployeeRate and payRateTemplate are mutually exclusive - pick one rate source",
+      }),
     identity: z
       .object({
         externalIdFrom: z.literal("userId").default("userId"),

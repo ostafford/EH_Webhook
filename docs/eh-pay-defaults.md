@@ -11,9 +11,12 @@ employee. Most of that data is **company-wide**, not per-person.
 ## Probe results — against EH test business `555455`
 
 Run with `scripts/probe-eh-pay-defaults.sh` (creates and deletes one `ZZZTEST-`
-employee, never touches a pay run). The business is bare: no awards, no pay-rate
-templates, one pay schedule (`Weekly` / `32407`), one location (`Connecteam` /
-`436590`), 50 system pay categories.
+employee, never touches a pay run). Business config: one pay schedule
+(`Weekly` / `32407`), one location (`Connecteam` / `436590`). Originally bare
+(no awards / templates); the **Retail (General) Industry Award 2020 [MA000004]**
+was installed 2026-09-10 (`awardId: 1`) for the #39 probe — that added 117 award
+pay categories and 66 award pay-rate templates (one per classification × level ×
+age × permanent/casual, e.g. `General Retail Casual L3 21yrs & over`).
 
 | Sent on `POST .../employee/unstructured` | Result |
 |---|---|
@@ -21,25 +24,45 @@ templates, one pay schedule (`Weekly` / `32407`), one location (`Connecteam` /
 | `payScheduleId:"32407"`, `locationId:"436590"` *(exactly what `apply.ts` sends today)* | `201`, but `paySchedule` / `primaryLocation` **read back `null`** — **these keys are silently ignored** |
 | any single pay-run field (`hoursPerWeek`, `rate`, …) | `400` "Error validating pay run settings" — EH then demands the **whole set**: Default Pay Cycle Id, Primary Location Id, Default Pay Category Id, Rate, Rate Unit |
 | `paySchedule:"Weekly"`, `primaryLocation:"Connecteam"`, `primaryPayCategory:"Permanent Ordinary Hours"`, `rate:30`, `rateUnit:"Hourly"`, `hoursPerWeek:38`, `hoursPerDay:7.6` — **all by name** | `201`, **all seven persisted on read-back** (status stays `Incomplete` only because this synthetic employee has no bank / super / full tax details — the pay-run axis is now satisfied) |
-| `classification:"Level 2"` | **silently dropped** — not a recognised key; doesn't even trigger pay-run validation |
 | `standardHoursPerWeek:40` | **silently dropped** — the real fields are `hoursPerWeek` / `hoursPerDay` |
-| `awardId:0` | `400` "Award 0 not found for the business" — `awardId` **is** a validated input field (needs a real award id; this business has none to test) |
+
+### Award / classification (issue #39 — probed 2026-09-10, award `1` installed)
+
+| Sent on `POST .../employee/unstructured` | Result |
+|---|---|
+| `payRateTemplate:"General Retail Casual L3 21yrs & over"` **+ the full pay-run set** (`paySchedule` + `primaryLocation` + `primaryPayCategory`, by name) | `201`, **`payRateTemplate` persists**; EH **auto-fills `rate` (28.89) and `rateUnit` (Hourly)** from the award template — no `rate`/`rateUnit` sent. `primaryPayCategory` is normalised to the award's name (`Casual - Ordinary Hours`). `overrideTemplateRate` reads back `False`. |
+| `payRateTemplate:"…"` **alone** (no `paySchedule`/`primaryLocation`/`primaryPayCategory`) | `400` "Default Pay Cycle Id / Primary Location Id / Default Pay Category Id should not be empty" — **`payRateTemplate` is part of the same all-or-nothing pay-run set** |
+| `payRateTemplateId: <numeric id>` (e.g. `2130323`) | **silently dropped** — with a full set it even `400`s "'Rate' must not be empty" (the id does **not** resolve the template). Use the **name**, key `payRateTemplate`. |
+| `awardId: 1` (a real, installed award id) | **silently dropped** on the unstructured endpoint — never persists, changes nothing vs. omitting it. The award link is implicit in `payRateTemplate`. |
+| `awardId: 0` | `400` "Award 0 not found for the business" — `awardId` is still *parsed* and validated, it just isn't *stored* on the employee here |
+| `classification:"Level 2"` (bare string) | **silently dropped** — not a recognised key |
+| full set + `payRateTemplate` (award rate) — synthetic employee, no bank/super/tax | `status` **stays `Incomplete`** — the award/pay-run axis is satisfied but the bank/super/tax axes are not (that's #45, not #39) |
 
 ### Conclusions
 
 1. **The unstructured endpoint _does_ accept pay-run defaults** — by **name**, and
    as an all-or-nothing set: `paySchedule`, `primaryLocation`,
-   `primaryPayCategory`, `rate`, `rateUnit`, `hoursPerWeek`, `hoursPerDay`, plus
-   `awardId` (numeric id, validated against the business).
+   `primaryPayCategory`, then **either** `rate` + `rateUnit` **or**
+   `payRateTemplate` (name), plus optional `hoursPerWeek` / `hoursPerDay`.
 2. **A partial set is a `400`.** The field-map `defaults` block therefore has to
    carry the whole set to move a record off `Incomplete` on the pay-run axis.
-3. **`classification` / `payCategoryId` / `standardHoursPerWeek`** (this doc's
-   first draft) are **not** accepted here. Use `primaryPayCategory` (name) and
-   `hoursPerWeek` / `hoursPerDay`.
-4. **`rate` is genuinely per-person** for most workforces — a single company-wide
-   `rate` only fits a flat-rate team. So `defaults` is realistically "flip to
-   Complete for a single-rate workforce"; anything with real pay bands still
-   needs per-employee entry (Connecteam custom field or manual EH).
+3. **`classification` / `payCategoryId` / `standardHoursPerWeek` / `awardId` /
+   `payRateTemplateId`** are **not** accepted. Use `primaryPayCategory` (name),
+   `hoursPerWeek` / `hoursPerDay`, and — for award workforces — `payRateTemplate`
+   (the template **name**, which *is* the classification).
+4. **Award classification == a pay-rate template name.** For an award workforce
+   the per-employee value is the `payRateTemplate` string; EH derives the correct
+   `rate`/`rateUnit` from it and keeps that rate current at each Fair Work review.
+   `awardId` itself is business-wide (installed once in EH) and is **not** sent
+   per employee. `overrideTemplateRate: true` + an explicit `rate` would override
+   the template rate — not needed for the award path.
+5. **`rate` (non-award path) is genuinely per-person** for most workforces — a
+   single company-wide `rate` only fits a flat-rate team. So `defaults` alone is
+   "flip to Complete for a single-rate workforce"; real pay bands need either
+   `payRateTemplate` per employee (award) or `perEmployeeRate` (#42, non-award).
+6. **The award/pay-run axis is not the only Complete gate.** Even a full set with
+   a valid award template left the synthetic record `Incomplete` — bank / super /
+   tax-declaration are separate axes (#45).
 
 ## Bug found by the probe — fixed in #34
 
@@ -116,5 +139,32 @@ and an optional `hoursPerWeek` from a per-employee `number` field rule. See
   for an employee (no pay rate on file, disabled default rate, monthly type,
   missing `defaults` name), `applyFieldMap` emits **no** pay-run keys and the
   sync raises one follow-up — EH is never sent a partial set.
-- **`classification` / award classification** — needs a business with awards to
-  probe, and likely a `payRateTemplate` rather than a bare field.
+- **`classification` / award classification** — resolved by #39 (probed
+  2026-09-10 against `awardId: 1`). The accepted key is **`payRateTemplate`**,
+  the template **name** (which encodes classification + level + age +
+  permanent/casual), sent as part of the all-or-nothing pay-run set. EH fills
+  `rate` / `rateUnit` from the template. `awardId`, `classification`,
+  `payRateTemplateId` are **not** accepted on the unstructured endpoint. See the
+  "Award / classification" table above.
+
+## Award path — how it maps to Connecteam (issue #39)
+
+For an **award-covered** client the split is:
+
+| Piece | Where it lives | Per-employee? | Connecteam involvement |
+|---|---|---|---|
+| The award itself (`awardId`) | Installed once in **EH** by a payroll admin | No — business-wide | **None.** Connecteam has no field for it and the sync never sends it. |
+| `paySchedule` / `primaryLocation` / `primaryPayCategory` | field-map `employmentHero.defaults` | No — business-wide | Config only |
+| **Classification** = `payRateTemplate` name | **EH** (the award auto-creates the templates) | **Yes** | One Connecteam field holding the template name, e.g. `General Retail Casual L3 21yrs & over`. It is a payroll decision, so it must be an **admin-completed** onboarding-pack field / admin-maintained profile field — never employee self-service. |
+| `rate` / `rateUnit` | Derived by EH from the template | n/a | **None** — do *not* also send `perEmployeeRate` (#42) on the award path; the two are alternatives. |
+| `hoursPerWeek` / `hoursPerDay` | Per-employee `number` field rule (#42 plumbing) | Yes | Existing per-employee number field |
+
+**Built (issue #39).** Opt in with `employmentHero.payRateTemplate:
+{ source: "connecteamField" }` plus a `fields[]` rule `{ eh: "payRateTemplate",
+from: { customFieldId: <admin field> }, transform: "trimString" }`. `applyFieldMap`
+then treats the template name as the rate axis (drops any explicit `rate` /
+`rateUnit`), keeps the location axis from `defaults`, and is all-or-nothing — a
+blank template for an employee raises one admin follow-up, no partial write.
+Mutually exclusive with `perEmployeeRate`. A single-classification workforce can
+instead set `employmentHero.defaults.payRateTemplate` (string) directly. See
+[`adr/0004-award-classification-as-a-pay-rate-template.md`](./adr/0004-award-classification-as-a-pay-rate-template.md).

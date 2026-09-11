@@ -52,13 +52,15 @@ export interface MappingResult {
    */
   payRunIssues: string[];
   /**
-   * True when the complete pay-run set (`paySchedule` + `primaryLocation` +
-   * `primaryPayCategory` + `rate` + `rateUnit`) resolved for this record -
-   * whether from a flat `employmentHero.defaults` (issue #26) or, with
-   * `perEmployeeRate` on, from `defaults` + the Connecteam pay-rates API
-   * (issue #42). EH's pay-run axis should then be satisfied, so a later "pay run
-   * defaults incomplete" from EH is a field-map misconfiguration, not
-   * per-employee admin work.
+   * True when the complete pay-run set resolved for this record: the location
+   * axis (`paySchedule` + `primaryLocation` + `primaryPayCategory`) plus the
+   * rate axis (`rate` + `rateUnit`, OR a `payRateTemplate` that EH derives them
+   * from). The values may come from a flat `employmentHero.defaults` (issue #26),
+   * from `defaults` + the Connecteam pay-rates API with `perEmployeeRate` on
+   * (issue #42), or from `defaults` + a per-employee `payRateTemplate` field with
+   * `payRateTemplate` on (issue #39). EH's pay-run axis should then be satisfied,
+   * so a later "pay run defaults incomplete" from EH is a field-map
+   * misconfiguration, not per-employee admin work.
    */
   payRunDefaultsComplete: boolean;
 }
@@ -85,24 +87,37 @@ const RATE_UNIT_BY_TYPE: Record<string, string> = {
 };
 
 /**
- * The pay-run fields EH validates all-or-nothing on the unstructured endpoint
- * (`docs/eh-pay-defaults.md`). Hours and award are optional extras.
+ * The pay-run "location axis" EH validates all-or-nothing on the unstructured
+ * endpoint (`docs/eh-pay-defaults.md`). The "rate axis" is separate - see
+ * {@link rateAxisComplete}. Hours and award are optional extras.
  */
-const PAY_RUN_REQUIRED = [
-  "paySchedule",
-  "primaryLocation",
-  "primaryPayCategory",
-  "rate",
-  "rateUnit",
-] as const;
+const PAY_RUN_LOCATION = ["paySchedule", "primaryLocation", "primaryPayCategory"] as const;
 
 /** Every pay-run key we might emit - stripped as a block when the set is incomplete. */
 const PAY_RUN_ALL = [
-  ...PAY_RUN_REQUIRED,
+  ...PAY_RUN_LOCATION,
+  "rate",
+  "rateUnit",
+  "payRateTemplate",
   "hoursPerWeek",
   "hoursPerDay",
   "awardId",
 ] as const;
+
+/**
+ * The pay-run "rate axis" is satisfied by an award pay-rate template (EH derives
+ * `rate`/`rateUnit` from it - `docs/eh-pay-defaults.md` issue #39) OR by an
+ * explicit `rate` + `rateUnit`.
+ */
+function rateAxisComplete(payload: Record<string, PayloadValue>): boolean {
+  if (!isBlank(payload.payRateTemplate)) return true;
+  return !isBlank(payload.rate) && !isBlank(payload.rateUnit);
+}
+
+/** Both axes present => EH's pay-run validation should pass. */
+function payRunComplete(payload: Record<string, PayloadValue>): boolean {
+  return PAY_RUN_LOCATION.every((k) => !isBlank(payload[k])) && rateAxisComplete(payload);
+}
 
 const BASE: Record<TransformName, (v: unknown) => PayloadValue> = {
   trimString: t.trimString,
@@ -177,16 +192,23 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
 /**
  * Fold the pay-run set into the payload and report whether it is complete.
  *
- * Two modes:
+ * Three modes:
  *  - default (issues #26, #34): the opt-in `employmentHero.defaults` block is
  *    copied verbatim - its schema key names already match the EH
  *    unstructured-employee field names, verified in `docs/eh-pay-defaults.md`.
- *    The set is "complete" only if `defaults` itself carried the whole of it.
+ *    The set is "complete" only if `defaults` itself carried both axes.
  *  - `perEmployeeRate` on (issue #42): `rate` + `rateUnit` come from the
- *    employee's Connecteam pay rate; `paySchedule` / `primaryLocation` /
- *    `primaryPayCategory` still come from `defaults`. If ANY required field
- *    cannot be resolved, every pay-run key is stripped (EH 400s a partial set)
- *    and a plain-language issue is returned for the follow-up.
+ *    employee's Connecteam pay rate; the location axis still comes from
+ *    `defaults`.
+ *  - `payRateTemplate` on (issue #39): the rate axis is an award classification -
+ *    a `payRateTemplate` NAME from a `fields[]` rule (an admin-completed
+ *    Connecteam field). EH derives `rate`/`rateUnit` from it, so any explicit
+ *    `rate`/`rateUnit` on the payload is dropped. Location axis still from
+ *    `defaults`.
+ *
+ * In the two opt-in modes, if ANY required field cannot be resolved for this
+ * employee, every pay-run key is stripped (EH 400s a partial set) and a
+ * plain-language issue is returned for the follow-up.
  */
 function applyPayRun(
   payload: Record<string, PayloadValue>,
@@ -201,32 +223,44 @@ function applyPayRun(
     }
   }
 
-  if (!eh.perEmployeeRate) {
-    const complete =
-      !!defaults &&
-      PAY_RUN_REQUIRED.every((k) => {
-        const v = defaults[k];
-        return v !== undefined && v !== null && v !== "";
-      });
-    return { complete, issues: [] };
+  if (!eh.perEmployeeRate && !eh.payRateTemplate) {
+    // Pure-defaults mode: complete only if `defaults` carried both axes itself
+    // (`payRunComplete` accepts a `defaults.payRateTemplate` as the rate axis).
+    return { complete: payRunComplete(payload), issues: [] };
   }
 
   const issues: string[] = [];
 
-  const rate = resolvePerEmployeeRate(payRate);
-  if ("issue" in rate) {
-    issues.push(rate.issue);
-  } else {
-    payload.rate = rate.rate;
-    payload.rateUnit = rate.rateUnit;
+  if (eh.perEmployeeRate) {
+    const rate = resolvePerEmployeeRate(payRate);
+    if ("issue" in rate) {
+      issues.push(rate.issue);
+    } else {
+      payload.rate = rate.rate;
+      payload.rateUnit = rate.rateUnit;
+    }
   }
 
-  for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory"] as const) {
+  if (eh.payRateTemplate) {
+    // The award template is the sole rate source - never send it alongside an
+    // explicit rate (EH would have to disambiguate via overrideTemplateRate).
+    delete payload.rate;
+    delete payload.rateUnit;
+    if (isBlank(payload.payRateTemplate)) {
+      issues.push(
+        "This employee has no pay rate template (award classification) set in " +
+          "Connecteam. Set it on their profile, or set the pay rate in " +
+          "Employment Hero by hand.",
+      );
+    }
+  }
+
+  for (const k of PAY_RUN_LOCATION) {
     if (isBlank(payload[k])) {
       issues.push(
         `Pay-run "${k}" is not configured in the field-map ` +
           `(employmentHero.defaults.${k}) - it is required for every employee ` +
-          `once perEmployeeRate is enabled.`,
+          `once perEmployeeRate or payRateTemplate is enabled.`,
       );
     }
   }

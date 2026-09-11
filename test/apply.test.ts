@@ -240,6 +240,120 @@ describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
   });
 });
 
+describe("applyFieldMap - employmentHero.payRateTemplate (issue #39)", () => {
+  const TEMPLATE_CF = 90000002;
+  const TEMPLATE = "General Retail Casual L3 21yrs & over";
+
+  const withTemplate = (defaultsOver: Record<string, unknown> = {}) =>
+    parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: {
+          paySchedule: "Weekly",
+          primaryLocation: "Connecteam",
+          primaryPayCategory: "Casual - Ordinary Hours",
+          ...defaultsOver,
+        },
+        payRateTemplate: { source: "connecteamField" },
+      },
+      fields: [
+        ...map.fields,
+        { eh: "payRateTemplate", from: { customFieldId: TEMPLATE_CF }, transform: "trimString" },
+      ],
+    });
+
+  const userWith = (value: string | undefined) => {
+    const u = clone();
+    if (value !== undefined) {
+      u.customFields.push({ customFieldId: TEMPLATE_CF, type: "str", name: "EH classification", value });
+    }
+    return u;
+  };
+
+  it("rejects payRateTemplate + perEmployeeRate together", () => {
+    const bad = {
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        perEmployeeRate: { source: "connecteamPayRate" },
+        payRateTemplate: { source: "connecteamField" },
+      },
+    };
+    expect(() => parseFieldMap(bad)).toThrow(/mutually exclusive/i);
+  });
+
+  it("completes the pay-run set from the location axis + the classification field", () => {
+    const r = applyFieldMap(userWith(TEMPLATE), withTemplate());
+    expect(r.payRunIssues).toEqual([]);
+    expect(r.payRunDefaultsComplete).toBe(true);
+    expect(r.payload.paySchedule).toBe("Weekly");
+    expect(r.payload.primaryLocation).toBe("Connecteam");
+    expect(r.payload.primaryPayCategory).toBe("Casual - Ordinary Hours");
+    expect(r.payload.payRateTemplate).toBe(TEMPLATE);
+    // EH derives these from the template - the sync never sends them here
+    expect(r.payload.rate).toBeUndefined();
+    expect(r.payload.rateUnit).toBeUndefined();
+  });
+
+  it("drops any explicit rate / rateUnit - the award template is the sole rate source", () => {
+    const r = applyFieldMap(userWith(TEMPLATE), withTemplate({ rate: 30, rateUnit: "Hourly" }));
+    expect(r.payload.rate).toBeUndefined();
+    expect(r.payload.rateUnit).toBeUndefined();
+    expect(r.payload.payRateTemplate).toBe(TEMPLATE);
+    expect(r.payRunDefaultsComplete).toBe(true);
+  });
+
+  it("no classification on the employee -> follow-up, and not one pay-run key sent", () => {
+    const r = applyFieldMap(userWith(undefined), withTemplate());
+    expect(r.payRunIssues).toHaveLength(1);
+    expect(r.payRunIssues[0]).toMatch(/no pay rate template/i);
+    expect(r.payRunDefaultsComplete).toBe(false);
+    expect(r.issues).toEqual([]); // admin/config, not an employee-facing correction
+    for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory", "payRateTemplate"]) {
+      expect(r.payload[k as keyof typeof r.payload]).toBeUndefined();
+    }
+  });
+
+  it("names a missing location-axis default - stays all-or-nothing", () => {
+    const map2 = parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: { paySchedule: "Weekly", primaryLocation: "Connecteam" }, // no primaryPayCategory
+        payRateTemplate: { source: "connecteamField" },
+      },
+      fields: [
+        ...map.fields,
+        { eh: "payRateTemplate", from: { customFieldId: TEMPLATE_CF }, transform: "trimString" },
+      ],
+    });
+    const r = applyFieldMap(userWith(TEMPLATE), map2);
+    expect(r.payRunIssues.some((s) => s.includes("primaryPayCategory"))).toBe(true);
+    expect(r.payload.payRateTemplate).toBeUndefined();
+    expect(r.payload.paySchedule).toBeUndefined();
+  });
+
+  it("a company-wide defaults.payRateTemplate satisfies the rate axis on its own", () => {
+    const m = parseFieldMap({
+      ...map,
+      employmentHero: {
+        ...map.employmentHero,
+        defaults: {
+          paySchedule: "Weekly",
+          primaryLocation: "Connecteam",
+          primaryPayCategory: "Casual - Ordinary Hours",
+          payRateTemplate: TEMPLATE,
+        },
+      },
+    });
+    const r = applyFieldMap(clone(), m);
+    expect(r.payRunDefaultsComplete).toBe(true);
+    expect(r.payload.payRateTemplate).toBe(TEMPLATE);
+    expect(r.payload.rate).toBeUndefined();
+  });
+});
+
 describe("applyFieldMap - happy path", () => {
   const { payload, issues, externalId, emailFallback, followUps } = applyFieldMap(clone(), map);
 

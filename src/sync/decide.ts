@@ -78,14 +78,16 @@ const ADMIN_ONLY_INCOMPLETE =
   /pay run default|pay-run default|pay category|pay rate|\baward\b|classification|employing entity|employee default|leave allowance|opening balance|work type/i;
 
 /**
- * The subset of admin-only phrases that a complete `employmentHero.defaults`
- * block is meant to satisfy (pay schedule / location / pay category / rate).
- * `award` / `classification` / `employing entity` etc. are deliberately absent -
- * `defaults` does not fully cover those, so they stay genuine admin follow-ups
- * even when the pay-run set is configured.
+ * The subset of admin-only phrases that a complete pay-run set is meant to
+ * satisfy: pay schedule / location / pay category / rate, and - since issue #39,
+ * when the client is on the award path (`employmentHero.payRateTemplate`, which
+ * makes `payRunDefaultsComplete` true) - award / classification too. This regex
+ * is only consulted when `payRunDefaultsComplete` is true, so a client that has
+ * NOT configured the award path still gets the plain admin follow-up for these.
+ * `employing entity` stays absent - nothing in the field-map covers it.
  */
 const PAY_RUN_SET_INCOMPLETE =
-  /pay run default|pay-run default|pay category|pay rate|pay schedule|primary location|employee default/i;
+  /pay run default|pay-run default|pay category|pay rate|pay schedule|primary location|employee default|\baward\b|classification/i;
 
 function incompleteIsAdminOnly(detailedStatus: string | null): boolean {
   return ADMIN_ONLY_INCOMPLETE.test(detailedStatus ?? "");

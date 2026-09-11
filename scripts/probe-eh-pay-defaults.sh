@@ -12,6 +12,13 @@
 #       --pay-category "Permanent Ordinary Hours" --rate 30 --rate-unit Hourly \
 #       --hours-week 38 --hours-day 7.6 --award 12345
 #
+#   # award workforce: send the classification as a pay-rate template NAME; the
+#   # template supplies rate/rateUnit, so omit --rate / --rate-unit.
+#   scripts/probe-eh-pay-defaults.sh \
+#       --pay-category "Casual - Ordinary Hours" \
+#       --pay-rate-template "General Retail Casual L3 21yrs & over" \
+#       --hours-week 38 --hours-day 7.6
+#
 # Credentials: EH_API_KEY / EH_BUSINESS_ID from the environment or .dev.vars.
 # See docs/eh-pay-defaults.md for the recorded results.
 
@@ -30,17 +37,18 @@ B="$BASE/business/$BUSINESS_ID"
 H=(-H "authorization: $AUTH" -H "content-type: application/json" -H "accept: application/json")
 
 PAY_CATEGORY="" RATE="" RATE_UNIT="" HOURS_WEEK="" HOURS_DAY="" AWARD="" \
-  PAY_SCHEDULE="" LOCATION=""
+  PAY_SCHEDULE="" LOCATION="" PAY_RATE_TEMPLATE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pay-category) PAY_CATEGORY="$2"; shift 2 ;;
-    --rate)         RATE="$2"; shift 2 ;;
-    --rate-unit)    RATE_UNIT="$2"; shift 2 ;;
-    --hours-week)   HOURS_WEEK="$2"; shift 2 ;;
-    --hours-day)    HOURS_DAY="$2"; shift 2 ;;
-    --award)        AWARD="$2"; shift 2 ;;
-    --pay-schedule) PAY_SCHEDULE="$2"; shift 2 ;;
-    --location)     LOCATION="$2"; shift 2 ;;
+    --pay-category)      PAY_CATEGORY="$2"; shift 2 ;;
+    --rate)             RATE="$2"; shift 2 ;;
+    --rate-unit)        RATE_UNIT="$2"; shift 2 ;;
+    --hours-week)       HOURS_WEEK="$2"; shift 2 ;;
+    --hours-day)        HOURS_DAY="$2"; shift 2 ;;
+    --award)            AWARD="$2"; shift 2 ;;
+    --pay-schedule)     PAY_SCHEDULE="$2"; shift 2 ;;
+    --location)         LOCATION="$2"; shift 2 ;;
+    --pay-rate-template) PAY_RATE_TEMPLATE="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -74,7 +82,8 @@ probe() {
     const r = JSON.parse(require("fs").readFileSync("/tmp/probe_rb","utf8"));
     console.log("   status:", r.status, "| detailedStatus:", JSON.stringify(r.detailedStatus));
     const keys = ["paySchedule","primaryLocation","primaryPayCategory","rate","rateUnit",
-                  "hoursPerWeek","hoursPerDay","awardId","businessAwardPackage",
+                  "hoursPerWeek","hoursPerDay","payRateTemplate","overrideTemplateRate",
+                  "awardId","businessAwardPackage","payRateTemplateId",
                   "classification","standardHoursPerWeek","payScheduleId","locationId"];
     for (const k of keys) {
       const v = r[k];
@@ -96,7 +105,8 @@ probe "legacy: payScheduleId + locationId (ignored by the unstructured endpoint)
 # 2. the pay-run-default set, by NAME (the shape docs/eh-pay-defaults.md verifies)
 probe "pay-run defaults by name (full set)" \
   "$(PAY_SCHEDULE="$PAY_SCHEDULE" LOCATION="$LOCATION" PAY_CATEGORY="$PAY_CATEGORY" \
-     RATE="$RATE" RATE_UNIT="$RATE_UNIT" HOURS_WEEK="$HOURS_WEEK" HOURS_DAY="$HOURS_DAY" AWARD="$AWARD" node -e '
+     RATE="$RATE" RATE_UNIT="$RATE_UNIT" HOURS_WEEK="$HOURS_WEEK" HOURS_DAY="$HOURS_DAY" AWARD="$AWARD" \
+     PAY_RATE_TEMPLATE="$PAY_RATE_TEMPLATE" node -e '
     const o = {};
     const s = (k,v) => { if (v) o[k] = v; };
     const n = (k,v) => { if (v) o[k] = Number(v); };
@@ -107,13 +117,17 @@ probe "pay-run defaults by name (full set)" \
     s("rateUnit", process.env.RATE_UNIT);
     n("hoursPerWeek", process.env.HOURS_WEEK);
     n("hoursPerDay", process.env.HOURS_DAY);
+    // award classification = a pay-rate template NAME; it fills rate/rateUnit itself.
+    s("payRateTemplate", process.env.PAY_RATE_TEMPLATE);
     if (process.env.AWARD) o.awardId = /^\d+$/.test(process.env.AWARD) ? Number(process.env.AWARD) : process.env.AWARD;
     process.stdout.write(JSON.stringify(o));
   ')"
 
-# 3. the names this doc's FIRST draft guessed - expected to be dropped silently
-probe "rejected names (classification / standardHoursPerWeek) - expect silently dropped" \
-  '{"classification":"Level 2","standardHoursPerWeek":40}'
+# 3. keys that are NOT recognised on the unstructured endpoint - expect all dropped.
+#    (#39, business 555455 with award 1 installed: payRateTemplateId / awardId /
+#     classification never persist; only payRateTemplate by NAME works.)
+probe "dead keys (classification / standardHoursPerWeek / payRateTemplateId / awardId alone) - expect all dropped" \
+  '{"classification":"Level 2","standardHoursPerWeek":40,"payRateTemplateId":0,"awardId":1}'
 
 cat <<'EON'
 Read the result:
