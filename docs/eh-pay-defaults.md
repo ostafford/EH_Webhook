@@ -1,5 +1,9 @@
 # Company-wide EH pay-run defaults (issue #26)
 
+> The pay-run set is **one** of the axes EH needs for `status: Complete`. The
+> full set — basic details, address, TFN, bank, pay-run — is verified in
+> [`eh-complete-criteria.md`](./eh-complete-criteria.md) (issue #45).
+
 ## Problem
 
 Every synced employee lands in Employment Hero as
@@ -36,7 +40,7 @@ age × permanent/casual, e.g. `General Retail Casual L3 21yrs & over`).
 | `awardId: 1` (a real, installed award id) | **silently dropped** on the unstructured endpoint — never persists, changes nothing vs. omitting it. The award link is implicit in `payRateTemplate`. |
 | `awardId: 0` | `400` "Award 0 not found for the business" — `awardId` is still *parsed* and validated, it just isn't *stored* on the employee here |
 | `classification:"Level 2"` (bare string) | **silently dropped** — not a recognised key |
-| full set + `payRateTemplate` (award rate) — synthetic employee, no bank/super/tax | `status` **stays `Incomplete`** — the award/pay-run axis is satisfied but the bank/super/tax axes are not (that's #45, not #39) |
+| full set + `payRateTemplate` (award rate) — synthetic employee, no bank details | `status` **stays `Incomplete`** — the award/pay-run axis is satisfied but the basic-details / bank axes are not (see [`eh-complete-criteria.md`](./eh-complete-criteria.md), #45) |
 
 ### Conclusions
 
