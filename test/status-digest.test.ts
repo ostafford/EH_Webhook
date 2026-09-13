@@ -1,0 +1,65 @@
+import { describe, it, expect } from "vitest";
+import { digestMessages, type DigestEmployee } from "../src/status/digest.js";
+
+function employee(over: Partial<DigestEmployee>): DigestEmployee {
+  return { ctUserId: 100, ehEmployeeId: "1", state: "waiting_on_employee", reasons: ["taxFileNumber"], ...over };
+}
+
+describe("digestMessages", () => {
+  it("is a single all-clear line when everyone is ready", () => {
+    const msgs = digestMessages([employee({ state: "ready", reasons: [] })], 1);
+    expect(msgs).toEqual(["All 1 employee is Complete in Employment Hero - no follow-up needed."]);
+  });
+
+  it("pluralises the all-clear line", () => {
+    const msgs = digestMessages(
+      [employee({ ctUserId: 1, state: "ready", reasons: [] }), employee({ ctUserId: 2, state: "ready", reasons: [] })],
+      2,
+    );
+    expect(msgs).toEqual(["All 2 employees are Complete in Employment Hero - no follow-up needed."]);
+  });
+
+  it("groups non-ready employees by state, in a fixed order, with names when known", () => {
+    const employees: DigestEmployee[] = [
+      employee({ ctUserId: 1, state: "ready", reasons: [] }),
+      employee({ ctUserId: 2, state: "broken", reasons: ["retries exhausted"] }),
+      employee({ ctUserId: 3, state: "waiting_on_admin", reasons: ["Pay Run Defaults are incomplete"], name: "Ada Lovelace" }),
+      employee({ ctUserId: 4, state: "waiting_on_employee", reasons: ["taxFileNumber", "bsb"] }),
+    ];
+    const [msg] = digestMessages(employees, 4);
+    expect(msg).toBe(
+      [
+        "Payroll sync status: 3 of 4 employees need attention.",
+        "",
+        "Waiting on employee:",
+        "- Connecteam user 4 — taxFileNumber; bsb",
+        "",
+        "Waiting on admin:",
+        "- Ada Lovelace (3) — Pay Run Defaults are incomplete",
+        "",
+        "Broken:",
+        "- Connecteam user 2 — retries exhausted",
+      ].join("\n"),
+    );
+  });
+
+  it("falls back to a generic reason line when reasons is empty", () => {
+    const [msg] = digestMessages([employee({ reasons: [] })], 1);
+    expect(msg).toContain("— see the audit log");
+  });
+
+  it("splits into multiple chunks, each within the Connecteam 500-char message clamp", () => {
+    const many: DigestEmployee[] = Array.from({ length: 40 }, (_, i) =>
+      employee({ ctUserId: 1000 + i, name: `Employee Number ${i}`, reasons: ["taxFileNumber looks invalid, please re-enter it"] }),
+    );
+    const msgs = digestMessages(many, 40);
+    expect(msgs.length).toBeGreaterThan(1);
+    for (const m of msgs) expect(m.length).toBeLessThanOrEqual(500);
+    // every employee still appears exactly once across the chunks
+    for (const e of many) {
+      const hits = msgs.filter((m) => m.includes(String(e.ctUserId)));
+      expect(hits.length).toBe(1);
+    }
+    expect(msgs[1]?.startsWith("(cont.) ")).toBe(true);
+  });
+});

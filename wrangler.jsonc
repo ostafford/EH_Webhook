@@ -7,7 +7,8 @@
   "observability": { "enabled": true },
 
   // Non-secret, per-deployment. Fill these from the client's accounts (see docs/RUNBOOK.md).
-  // Secrets are set with `wrangler secret put`: CT_API_KEY, EH_API_KEY, CT_WEBHOOK_SECRET.
+  // Secrets are set with `wrangler secret put`: CT_API_KEY, EH_API_KEY, CT_WEBHOOK_SECRET,
+  // and optionally STATUS_TOKEN (see below).
   "vars": {
     // Leave blank: the Worker loads clients/self/field-map.json. Set only for a
     // multi-tenant deployment (see src/mapping/registry.ts).
@@ -16,6 +17,10 @@
     "CT_ONBOARDING_PACK_ID": "",
     "CT_CUSTOM_PUBLISHER_ID": "",
     "ADMIN_CONNECTEAM_CHANNEL_ID": "",
+    // Day of week (0=Sun..6=Sat, UTC) the weekly /status digest posts to the
+    // admin channel. Blank = Monday. It can also always be run on demand via
+    // `POST /status/digest`.
+    "STATUS_DIGEST_DAY": "",
     // Optional integrator telemetry -> the standalone integrator-relay/ Worker.
     // Blank URL = off. INTEGRATOR_ALERT_SECRET is a secret (`wrangler secret
     // put`), not a var, and must equal the relay's RELAY_SECRET.

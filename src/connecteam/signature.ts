@@ -64,8 +64,8 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
 
-/** Constant-time string compare. */
-function timingSafeEqual(a: string, b: string): boolean {
+/** Constant-time string compare. Exported for other shared-secret checks (e.g. `/status` auth). */
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);

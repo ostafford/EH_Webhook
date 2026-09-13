@@ -7,6 +7,7 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sync_meta"),
     env.DB.prepare("DELETE FROM employee_map"),
+    env.DB.prepare("DELETE FROM sync_log"),
   ]);
 });
 
@@ -26,6 +27,10 @@ describe("/health (in workerd, real D1)", () => {
       lastSweepOkAt: null,
       webhookAccepted: 0,
       webhookRejected: 0,
+      ready: 0,
+      waitingEmployee: 0,
+      waitingAdmin: 0,
+      broken: 0,
     });
     expect(body.d1).toBe("ok");
   });
@@ -46,6 +51,21 @@ describe("/health (in workerd, real D1)", () => {
       lastSweepOkAt: new Date(1_700_000_000_000).toISOString(),
       webhookAccepted: 3,
       webhookRejected: 1,
+      ready: 0,
+      waitingEmployee: 0,
+      waitingAdmin: 0,
+      broken: 0,
     });
+  });
+
+  it("derives the sync-status roster counts (issue #44) from real D1 rows", async () => {
+    const store = new SyncStore(env.DB);
+    await store.saveEmployeeLink({ ctUserId: 1, ehEmployeeId: "1", lastSyncedTs: 1, lastPayloadHash: "h1", lastOutcome: "ok" });
+    await store.appendSyncLog({ ctUserId: 1, at: 1, outcome: "ok", detail: "synced" });
+    await store.saveEmployeeLink({ ctUserId: 2, ehEmployeeId: "2", lastSyncedTs: 1, lastPayloadHash: "h2", lastOutcome: "correction" });
+    await store.appendSyncLog({ ctUserId: 2, at: 1, outcome: "correction", detail: "correction: taxFileNumber" });
+
+    const { body } = await getHealth();
+    expect(body.ops).toMatchObject({ ready: 1, waitingEmployee: 1, waitingAdmin: 0, broken: 0 });
   });
 });

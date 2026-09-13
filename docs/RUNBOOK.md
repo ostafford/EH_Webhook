@@ -196,10 +196,13 @@ npx wrangler queues create eh-webhook-dlq
 npx wrangler secret put CT_API_KEY
 npx wrangler secret put EH_API_KEY
 npx wrangler secret put CT_WEBHOOK_SECRET
+# Optional: a dedicated bearer token for GET /status and POST /status/digest
+# (see "Sync-status roster" below). Unset falls back to CT_WEBHOOK_SECRET.
+npx wrangler secret put STATUS_TOKEN
 
 # Vars — set in wrangler.jsonc "vars" (leave FIELD_MAP_CLIENT blank):
 #   EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID,
-#   ADMIN_CONNECTEAM_CHANNEL_ID
+#   ADMIN_CONNECTEAM_CHANNEL_ID, STATUS_DIGEST_DAY (blank = Monday)
 
 # Verify, then deploy
 npm run typecheck && npm test
@@ -348,9 +351,45 @@ ops, at }` — and is passed through `src/redact.ts` regardless. Leave
 | `ops.lastSweepOkAt` | ISO time the approval sweep last completed cleanly | more than a few minutes stale |
 | `ops.webhookAccepted` | `user_updated` deliveries accepted (`202`) | still `0` long after go-live = the webhook isn't reaching the Worker |
 | `ops.webhookRejected` | `user_updated` deliveries rejected (`401`) | anything `> 0` = a `secretKey` mismatch |
+| `ops.ready` / `ops.waitingEmployee` / `ops.waitingAdmin` / `ops.broken` | sync-status roster counts — see below | `waitingAdmin` or `broken` staying above `0` for a while |
 
 Full request / queue / sweep detail is in the Cloudflare **Workers Logs** for the
 Worker — one JSON line per event, every line passed through `src/redact.ts` first.
+
+### Sync-status roster — `GET /status`
+
+A standing view of every employee the sync has ever touched, so an admin can
+answer "is everyone I manage fully and correctly in EH, and if not, who and
+why?" without opening EH per-person before a pay run.
+
+```bash
+curl -H "Authorization: Bearer $STATUS_TOKEN" https://<worker>.workers.dev/status
+```
+
+(`$STATUS_TOKEN` — or `$CT_WEBHOOK_SECRET` if `STATUS_TOKEN` was never set.)
+Each entry is one of:
+
+| State | Meaning |
+|---|---|
+| `ready` | Employment Hero reports the record `Complete` |
+| `waiting_on_employee` | an open Correction cycle — `reasons` names the field(s), `cycleCount` counts attempts |
+| `waiting_on_admin` | synced with safe defaults, but EH still needs a payroll admin to finish something by hand |
+| `broken` | a job for this person dead-lettered — `reasons` carries the last error |
+
+**Honest limit.** `ready` means EH **accepted** every value sent and reports the
+record payroll-ready — not that the values are **truthful**. EH validates
+format only; it never rejects a bad TFN at the API, it stores it and marks the
+record `Incomplete` (see `CONTEXT.md` "Validation failure"). Human correctness
+of the data stays a spot-check, not something this roster can guarantee.
+
+A weekly digest of everyone **not** `ready` posts to the alerts channel
+automatically (`STATUS_DIGEST_DAY`, default Monday, UTC) and on demand:
+
+```bash
+curl -X POST -H "Authorization: Bearer $STATUS_TOKEN" https://<worker>.workers.dev/status/digest
+```
+
+Silent but for a one-line "all clear" when everyone is `ready`.
 
 ### The three message types — who acts
 
@@ -379,9 +418,9 @@ Connecteam (edit the profile; first-time pack approval). Nothing auto-retries a
 dead-lettered job.
 
 ### Rotating keys
-`npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` with the
-new value, then rotate the far side. `CT_WEBHOOK_SECRET` must be updated on the
-Connecteam webhook registration at the same time.
+`npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` /
+`STATUS_TOKEN` with the new value, then rotate the far side. `CT_WEBHOOK_SECRET`
+must be updated on the Connecteam webhook registration at the same time.
 
 ---
 

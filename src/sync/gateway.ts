@@ -5,6 +5,7 @@
  * into the Worker.
  */
 import type { CycleStore } from "./cycles.js";
+import type { RosterRow } from "../status/roster.js";
 
 /** Matches the `sync_log.outcome` enum in {@link ../db/schema}. */
 export type SyncOutcomeLabel = "ok" | "correction" | "follow_up" | "retry" | "dead_letter" | "resolved";
@@ -63,4 +64,15 @@ export interface RecheckGateway
   extends Pick<SyncGateway, "appendSyncLog" | "saveEmployeeLink" | "readMeta" | "setMarker"> {
   /** Every `employee_map` row whose last attempt ended in a Manual-follow-up. */
   listFollowUpLinks(): Promise<EmployeeLink[]>;
+}
+
+/**
+ * The narrow surface the sync-status roster (issue #44) needs: every person we
+ * have ever seen, joined with their latest `sync_log` row, plus the markers the
+ * weekly digest schedules itself off. A separate interface for the same reason
+ * as {@link RecheckGateway} - existing fake gateways in other tests don't need
+ * to grow this method.
+ */
+export interface StatusGateway extends Pick<SyncGateway, "readMeta" | "setMarker"> {
+  listRosterRows(): Promise<RosterRow[]>;
 }

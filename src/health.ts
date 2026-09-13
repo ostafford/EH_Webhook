@@ -1,4 +1,5 @@
 import { loadFieldMap } from "./mapping/loader.js";
+import { ROSTER_QUERY_SQL, parseRosterRows, deriveRosterEntry, summarizeRoster } from "./status/roster.js";
 
 /** The bits of the Worker env that /health inspects. The real Env satisfies this. */
 export interface HealthEnv {
@@ -35,6 +36,11 @@ export interface Health {
     webhookAccepted: number;
     /** `user_updated` deliveries rejected (401): a delivery arrived but its secretKey did not match. */
     webhookRejected: number;
+    /** Sync-status roster counts (issue #44) - see src/status/roster.ts for state definitions. */
+    ready: number;
+    waitingEmployee: number;
+    waitingAdmin: number;
+    broken: number;
   } | null;
 }
 
@@ -76,12 +82,20 @@ async function readOps(env: HealthEnv): Promise<Health["ops"]> {
     const acked = m.get("acked_total") ?? 0;
     const deadLettered = m.get("dl_total") ?? 0;
     const sweepAt = m.get("last_sweep_ok_at") ?? 0;
+
+    const roster = await env.DB.prepare(ROSTER_QUERY_SQL).all();
+    const counts = summarizeRoster(parseRosterRows(roster.results).map(deriveRosterEntry));
+
     return {
       queueBacklog: Math.max(0, enqueued - acked - deadLettered),
       deadLettered,
       lastSweepOkAt: sweepAt > 0 ? new Date(sweepAt).toISOString() : null,
       webhookAccepted: m.get("webhook_202_total") ?? 0,
       webhookRejected: m.get("webhook_401_total") ?? 0,
+      ready: counts.ready,
+      waitingEmployee: counts.waitingEmployee,
+      waitingAdmin: counts.waitingAdmin,
+      broken: counts.broken,
     };
   } catch {
     return null;

@@ -1,0 +1,133 @@
+import { describe, it, expect } from "vitest";
+import {
+  deriveRosterEntry,
+  summarizeRoster,
+  parseRosterRows,
+  type RosterRow,
+} from "../src/status/roster.js";
+
+function row(over: Partial<RosterRow>): RosterRow {
+  return {
+    ctUserId: 100,
+    ehEmployeeId: "555",
+    failureCycleCount: 0,
+    lastOutcome: "ok",
+    latestOutcome: "ok",
+    latestDetail: "synced",
+    ...over,
+  };
+}
+
+describe("deriveRosterEntry", () => {
+  it("is ready when the last outcome was a clean sync", () => {
+    expect(deriveRosterEntry(row({}))).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: "555",
+      state: "ready",
+      reasons: [],
+    });
+  });
+
+  it("is ready when the daily recheck (#43) resolved a follow-up", () => {
+    const r = row({ lastOutcome: "resolved", latestOutcome: "resolved", latestDetail: 'resolved: status now "Complete"' });
+    expect(deriveRosterEntry(r).state).toBe("ready");
+  });
+
+  it("is waiting_on_employee for an open correction cycle, with field names and cycle count", () => {
+    const r = row({
+      lastOutcome: "correction",
+      latestOutcome: "correction",
+      latestDetail: "correction: taxFileNumber, bsb",
+      failureCycleCount: 2,
+    });
+    expect(deriveRosterEntry(r)).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: "555",
+      state: "waiting_on_employee",
+      reasons: ["taxFileNumber", "bsb"],
+      cycleCount: 2,
+    });
+  });
+
+  it("is waiting_on_admin for a manual follow-up, with the reason phrases", () => {
+    const r = row({
+      lastOutcome: "follow_up",
+      latestOutcome: "follow_up",
+      latestDetail: "follow_up: Pay Run Defaults are incomplete | SMSF super needs manual setup",
+    });
+    expect(deriveRosterEntry(r)).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: "555",
+      state: "waiting_on_admin",
+      reasons: ["Pay Run Defaults are incomplete", "SMSF super needs manual setup"],
+    });
+  });
+
+  it("falls back to a generic reason when the detail carries no prefix", () => {
+    const r = row({ lastOutcome: "follow_up", latestOutcome: "follow_up", latestDetail: null });
+    expect(deriveRosterEntry(r).reasons).toEqual(["Employment Hero flagged this record - see the audit log."]);
+  });
+
+  it("is broken when the latest sync_log row dead-lettered, even if employee_map is stale", () => {
+    // employee_map still says "ok" from an older successful sync - the LATEST
+    // sync_log row (dead_letter) wins, per handleDeadLetter never touching
+    // employee_map (src/sync/consumer.ts).
+    const r = row({ lastOutcome: "ok", latestOutcome: "dead_letter", latestDetail: "retries exhausted: employment hero unavailable: 503" });
+    expect(deriveRosterEntry(r)).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: "555",
+      state: "broken",
+      reasons: ["retries exhausted: employment hero unavailable: 503"],
+    });
+  });
+
+  it("is broken for a person with no employee_map row at all (dead-lettered on their first-ever attempt)", () => {
+    const r = row({
+      ehEmployeeId: null,
+      failureCycleCount: null,
+      lastOutcome: null,
+      latestOutcome: "dead_letter",
+      latestDetail: "retries exhausted: connecteam unavailable: 503",
+    });
+    expect(deriveRosterEntry(r)).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: null,
+      state: "broken",
+      reasons: ["retries exhausted: connecteam unavailable: 503"],
+    });
+  });
+});
+
+describe("summarizeRoster", () => {
+  it("tallies each state", () => {
+    const entries = [
+      deriveRosterEntry(row({ ctUserId: 1 })),
+      deriveRosterEntry(row({ ctUserId: 2, lastOutcome: "correction", latestOutcome: "correction", latestDetail: "correction: bsb" })),
+      deriveRosterEntry(row({ ctUserId: 3, lastOutcome: "follow_up", latestOutcome: "follow_up", latestDetail: "follow_up: reason" })),
+      deriveRosterEntry(row({ ctUserId: 4, latestOutcome: "dead_letter", latestDetail: "retries exhausted" })),
+    ];
+    expect(summarizeRoster(entries)).toEqual({ ready: 1, waitingEmployee: 1, waitingAdmin: 1, broken: 1 });
+  });
+
+  it("is all zeroes for an empty roster", () => {
+    expect(summarizeRoster([])).toEqual({ ready: 0, waitingEmployee: 0, waitingAdmin: 0, broken: 0 });
+  });
+});
+
+describe("parseRosterRows", () => {
+  it("normalises a raw D1 result row into a RosterRow", () => {
+    const rows = parseRosterRows([
+      { ctUserId: "100", ehEmployeeId: "555", failureCycleCount: "2", lastOutcome: "correction", latestOutcome: "correction", latestDetail: "correction: bsb" },
+    ]);
+    expect(rows).toEqual([
+      { ctUserId: 100, ehEmployeeId: "555", failureCycleCount: 2, lastOutcome: "correction", latestOutcome: "correction", latestDetail: "correction: bsb" },
+    ]);
+  });
+
+  it("defaults missing/null fields", () => {
+    const rows = parseRosterRows([{ ctUserId: 4 }]);
+    expect(rows).toEqual([
+      { ctUserId: 4, ehEmployeeId: null, failureCycleCount: null, lastOutcome: null, latestOutcome: null, latestDetail: null },
+    ]);
+  });
+});

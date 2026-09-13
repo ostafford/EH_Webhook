@@ -14,12 +14,15 @@ import type {
 } from "../sync/gateway.js";
 import type { OnboardingStateRow } from "../cron/sweep.js";
 import type { OnboardingAssignment } from "../connecteam/types.js";
+import { ROSTER_QUERY_SQL, parseRosterRows, type RosterRow } from "../status/roster.js";
 
 export class SyncStore implements SyncGateway {
   readonly #db: DrizzleD1Database;
+  readonly #raw: D1Database;
 
   constructor(d1: D1Database) {
     this.#db = drizzle(d1);
+    this.#raw = d1;
   }
 
   async getEmployeeLink(ctUserId: number): Promise<EmployeeLink | null> {
@@ -178,5 +181,19 @@ export class SyncStore implements SyncGateway {
     const rows = await this.#db.select().from(syncMeta);
     const found = new Map(rows.map((r) => [r.key, r.num]));
     return Object.fromEntries(keys.map((k) => [k, found.get(k) ?? 0]));
+  }
+
+  // --- sync-status roster (issue #44) ---
+
+  /**
+   * Every person we have ever seen, joined with their latest `sync_log` row -
+   * see `ROSTER_QUERY_SQL` (src/status/roster.ts) for why the id set is a UNION
+   * of `employee_map` and `sync_log` rather than just `employee_map`. Raw SQL,
+   * not drizzle, so `GET /health` (src/health.ts) can run the exact same query
+   * text through its own minimal D1 surface and never drift from this store.
+   */
+  async listRosterRows(): Promise<RosterRow[]> {
+    const { results } = await this.#raw.prepare(ROSTER_QUERY_SQL).all();
+    return parseRosterRows(results);
   }
 }

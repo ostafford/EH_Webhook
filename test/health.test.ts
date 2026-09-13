@@ -4,10 +4,13 @@ import { resetFieldMapCache } from "../src/mapping/loader.js";
 
 beforeEach(resetFieldMapCache);
 
-const okDb = (metaRows: Array<{ key: string; num: number }> = []) => ({
-  prepare: () => ({
+const okDb = (
+  metaRows: Array<{ key: string; num: number }> = [],
+  rosterRows: Array<Record<string, unknown>> = [],
+) => ({
+  prepare: (query: string) => ({
     first: async () => ({ ok: 1 }),
-    all: async () => ({ results: metaRows }),
+    all: async () => ({ results: query.includes("employee_map") ? rosterRows : metaRows }),
   }),
 });
 
@@ -82,6 +85,10 @@ describe("buildHealth", () => {
       lastSweepOkAt: new Date(1_700_000_000_000).toISOString(),
       webhookAccepted: 4,
       webhookRejected: 2,
+      ready: 0,
+      waitingEmployee: 0,
+      waitingAdmin: 0,
+      broken: 0,
     });
   });
 
@@ -93,6 +100,27 @@ describe("buildHealth", () => {
       lastSweepOkAt: null,
       webhookAccepted: 0,
       webhookRejected: 0,
+      ready: 0,
+      waitingEmployee: 0,
+      waitingAdmin: 0,
+      broken: 0,
     });
+  });
+
+  it("derives the sync-status roster counts (issue #44) from employee_map + sync_log", async () => {
+    const h = await buildHealth(
+      baseEnv({
+        DB: okDb(
+          [],
+          [
+            { ctUserId: 1, ehEmployeeId: "1", failureCycleCount: 0, lastOutcome: "ok", latestOutcome: "ok", latestDetail: "synced" },
+            { ctUserId: 2, ehEmployeeId: "2", failureCycleCount: 1, lastOutcome: "correction", latestOutcome: "correction", latestDetail: "correction: taxFileNumber" },
+            { ctUserId: 3, ehEmployeeId: "3", failureCycleCount: 0, lastOutcome: "follow_up", latestOutcome: "follow_up", latestDetail: "follow_up: pay-run defaults" },
+            { ctUserId: 4, ehEmployeeId: null, failureCycleCount: null, lastOutcome: null, latestOutcome: "dead_letter", latestDetail: "retries exhausted" },
+          ],
+        ),
+      }),
+    );
+    expect(h.ops).toMatchObject({ ready: 1, waitingEmployee: 1, waitingAdmin: 1, broken: 1 });
   });
 });

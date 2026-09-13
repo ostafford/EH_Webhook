@@ -11,6 +11,13 @@ export interface Env {
   CT_API_KEY: string;
   EH_API_KEY: string;
   CT_WEBHOOK_SECRET: string;
+  /**
+   * Bearer token for `GET /status` and `POST /status/digest` (issue #44).
+   * Optional - unset falls back to `CT_WEBHOOK_SECRET` so /status works out of
+   * the box, but a dedicated token lets it be rotated/shared independently of
+   * the Connecteam webhook secret.
+   */
+  STATUS_TOKEN?: string;
 
   // vars
   /** Only for a multi-tenant deployment; blank/unset loads clients/self/. */
@@ -19,6 +26,8 @@ export interface Env {
   CT_ONBOARDING_PACK_ID: string;
   CT_CUSTOM_PUBLISHER_ID: string;
   ADMIN_CONNECTEAM_CHANNEL_ID: string;
+  /** Day of week (0=Sun..6=Sat, UTC) the weekly status digest posts. Default: 1 (Monday). */
+  STATUS_DIGEST_DAY?: string;
 
   /**
    * Optional integrator telemetry. If set, the Worker also POSTs each System
