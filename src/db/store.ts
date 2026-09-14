@@ -114,6 +114,16 @@ export class SyncStore implements SyncGateway {
     });
   }
 
+  /** True if `onboarding_state` has ever recorded this person as `completed` (ADR-0002). */
+  async hasBeenApproved(ctUserId: number): Promise<boolean> {
+    const [row] = await this.#db
+      .select({ assignmentId: onboardingState.assignmentId })
+      .from(onboardingState)
+      .where(and(eq(onboardingState.ctUserId, ctUserId), eq(onboardingState.status, "completed")))
+      .limit(1);
+    return row !== undefined;
+  }
+
   // --- cron approval sweep (issue #7) ---
 
   async readOnboardingState(): Promise<OnboardingStateRow[]> {

@@ -47,6 +47,17 @@ export interface SyncGateway extends CycleStore {
   getEmployeeLink(ctUserId: number): Promise<EmployeeLink | null>;
   saveEmployeeLink(patch: EmployeeLinkPatch): Promise<void>;
   appendSyncLog(entry: SyncLogEntry): Promise<void>;
+  /**
+   * True once this person's onboarding-pack assignment has reached
+   * `status: completed` at least once (per `onboarding_state`, the approval
+   * sweep's own record - see ADR-0002). Gates the `user_updated` webhook path:
+   * a `profile_update` job for someone never yet approved is a mid-onboarding
+   * field edit, not a real sync-worthy change, and must not write to EH or
+   * message anyone. `approval` jobs (enqueued by the sweep the instant it
+   * observes the completed transition) are never gated by this - they ARE the
+   * approval signal.
+   */
+  hasBeenApproved(ctUserId: number): Promise<boolean>;
   /** Add `delta` to an operational counter for /health (queue backlog etc.). */
   bumpCounter(key: string, delta: number): Promise<void>;
   /** Read named `sync_meta` counters/markers; missing keys come back as 0. */

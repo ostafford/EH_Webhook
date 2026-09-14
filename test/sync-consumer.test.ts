@@ -24,7 +24,10 @@ const cloneUser = (): ConnecteamUser => structuredClone(syntheticUser);
 
 // --- fakes -----------------------------------------------------------------
 
-function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
+function fakeGateway(
+  seed: Partial<EmployeeLink> = {},
+  approved = true,
+): SyncGateway & {
   rows: Map<number, EmployeeLink>;
   log: SyncLogEntry[];
   counters: Map<string, number>;
@@ -56,6 +59,9 @@ function fakeGateway(seed: Partial<EmployeeLink> = {}): SyncGateway & {
     },
     async setMarker(key: string, value: number) {
       meta.set(key, value);
+    },
+    async hasBeenApproved() {
+      return approved;
     },
     async getEmployeeLink(id) {
       return rows.get(id) ?? null;
@@ -239,6 +245,44 @@ describe("runSyncJob - ordering and idempotency", () => {
     expect(out.status).toBe("synced");
     expect(eh.upserts).toHaveLength(2);
     expect(store.rows.get(17760356)!.lastSyncedTs).toBe(2000);
+  });
+});
+
+describe("runSyncJob - pre-approval webhook gate (ADR-0002)", () => {
+  it("skips a profile_update job for someone never yet approved, with no EH write and no message", async () => {
+    const store = fakeGateway({}, false);
+    const eh = fakeEh();
+    const ct = fakeCt(cloneUser());
+
+    const out = await runSyncJob(job({ reason: "profile_update" }), deps({ store, eh, ct: ct as never }));
+
+    expect(out).toMatchObject({ status: "skipped", reason: "onboarding pack not yet approved" });
+    expect(eh.upserts).toHaveLength(0);
+    expect(ct.dms).toEqual([]);
+    expect(ct.channels).toEqual([]);
+    expect(store.log).toEqual([]);
+    // Never even looked up the employee link - the gate gets there first.
+    expect(store.rows.size).toBe(0);
+  });
+
+  it("never gates an approval job - the sweep enqueuing it IS the approval signal", async () => {
+    const store = fakeGateway({}, false);
+    const eh = fakeEh({ id: 555, created: true });
+
+    const out = await runSyncJob(job({ reason: "approval" }), deps({ store, eh }));
+
+    expect(out.status).toBe("synced");
+    expect(eh.upserts).toHaveLength(1);
+  });
+
+  it("processes a profile_update job normally once the person has been approved", async () => {
+    const store = fakeGateway({}, true);
+    const eh = fakeEh({ id: 555, created: true });
+
+    const out = await runSyncJob(job({ reason: "profile_update" }), deps({ store, eh }));
+
+    expect(out.status).toBe("synced");
+    expect(eh.upserts).toHaveLength(1);
   });
 });
 

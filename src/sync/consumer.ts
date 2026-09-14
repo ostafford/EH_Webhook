@@ -67,6 +67,18 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   const now = deps.now ?? Date.now;
   const { ctUserId, eventTimestamp } = job;
 
+  // A `profile_update` job is the `user_updated` webhook firing - which fires on
+  // every field save, including mid-onboarding, before a pack is ever Approved
+  // (ADR-0002: the webhook only covers "ongoing edits AFTER approval"). Without
+  // this gate, filling in one field at a time during onboarding would run a
+  // full sync - and send a Correction/Manual-follow-up - on every keystroke's
+  // worth of save, for data that was never meant to reach EH yet. `approval`
+  // jobs are never gated here: the sweep only ever enqueues one the instant it
+  // observes the completed transition, so it IS the approval signal.
+  if (job.reason === "profile_update" && !(await deps.store.hasBeenApproved(ctUserId))) {
+    return { status: "skipped", reason: "onboarding pack not yet approved" };
+  }
+
   const link = await deps.store.getEmployeeLink(ctUserId);
 
   // Ordering / replay: last-write-wins on the Connecteam event time.
