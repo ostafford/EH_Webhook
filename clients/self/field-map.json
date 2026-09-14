@@ -52,7 +52,7 @@
     { "eh": "bankAccount1_AccountName", "from": { "customFieldId": 42921173 }, "transform": "trimString", "sensitive": true },
     { "eh": "bankAccount1_BSB", "from": { "customFieldId": 42923223 }, "transform": "zeroPad6", "sensitive": true },
     { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true },
-    { "eh": "payRateTemplate", "from": { "customFieldId": 43504863 }, "transform": "trimString" }
+    { "eh": "payRateTemplate", "from": { "customFieldId": 43504863 }, "transform": "dropdownValue" }
   ],
   "rules": {
     "taxDeclaration": {
