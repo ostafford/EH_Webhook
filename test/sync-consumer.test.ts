@@ -63,6 +63,12 @@ function fakeGateway(
     async hasBeenApproved() {
       return approved;
     },
+    async findByEhEmployeeId(ehEmployeeId: string) {
+      for (const r of rows.values()) {
+        if (r.ehEmployeeId === ehEmployeeId) return r.ctUserId;
+      }
+      return null;
+    },
     async getEmployeeLink(id) {
       return rows.get(id) ?? null;
     },
@@ -283,6 +289,46 @@ describe("runSyncJob - pre-approval webhook gate (ADR-0002)", () => {
 
     expect(out.status).toBe("synced");
     expect(eh.upserts).toHaveLength(1);
+  });
+});
+
+describe("runSyncJob - EH identity collision (TFN match merges two people)", () => {
+  it("detects a write landing on an EH employee id already linked to a different Connecteam user", async () => {
+    const store = fakeGateway();
+    // A different ctUserId already owns EH employee 555 - Employment Hero's
+    // TFN-matching just merged this sync's write onto that same record.
+    store.rows.set(99999, {
+      ctUserId: 99999,
+      ehEmployeeId: "555",
+      lastSyncedTs: 1,
+      failureCycleCount: 0,
+      lastPayloadHash: "x",
+    });
+    const eh = fakeEh({ id: 555, created: true });
+    const ct = fakeCt(cloneUser());
+
+    const out = await runSyncJob(job(), deps({ store, eh, ct: ct as never }));
+
+    expect(out).toMatchObject({ status: "collision" });
+    expect(out.reason).toContain("555");
+    expect(out.reason).toContain("99999");
+    // Never saved as a normal link for the colliding user, and the pre-existing
+    // owner's row is untouched.
+    expect(store.rows.has(17760356)).toBe(false);
+    expect(store.rows.get(99999)?.ehEmployeeId).toBe("555");
+    expect(store.log).toHaveLength(1);
+    expect(store.log[0]).toMatchObject({ ctUserId: 17760356, outcome: "collision" });
+    expect(ct.channels).toHaveLength(1);
+    expect(ct.channels[0]!.text).toMatch(/already linked to a different Connecteam user/);
+  });
+
+  it("does not flag a collision when the EH employee id is already this same person's own link", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, ehEmployeeId: "555", lastPayloadHash: "old-hash" });
+    const eh = fakeEh({ id: 555, created: false });
+
+    const out = await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, eh }));
+
+    expect(out.status).not.toBe("collision");
   });
 });
 

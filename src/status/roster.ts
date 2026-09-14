@@ -8,13 +8,17 @@
  *   - waiting_on_employee  the employee has an open Correction cycle.
  *   - waiting_on_admin     synced with safe defaults but EH still needs manual admin
  *                          setup (pay-run defaults, non-resident tax scale, SMSF, ...).
- *   - broken               a job for this person dead-lettered.
+ *   - broken               a job for this person dead-lettered, or their sync landed
+ *                          on an EH employee id already linked to a different
+ *                          Connecteam user (an identity collision - see
+ *                          SyncGateway.findByEhEmployeeId).
  *
  * `broken` is read off the LATEST sync_log row, not `employee_map.last_outcome` -
- * a dead-letter is never written to `employee_map` (see handleDeadLetter in
- * sync/consumer.ts), so a person whose very first-ever sync attempt dead-lettered
- * has no `employee_map` row at all. `ROSTER_QUERY_SQL` starts from the UNION of
- * both tables' ids so that person still shows up here as `broken`.
+ * neither a dead-letter nor a collision is ever written to `employee_map` (see
+ * handleDeadLetter and the collision check in sync/consumer.ts), so a person
+ * whose very first-ever sync attempt hit either has no `employee_map` row at
+ * all. `ROSTER_QUERY_SQL` starts from the UNION of both tables' ids so that
+ * person still shows up here as `broken`.
  *
  * No employee VALUE ever reaches this module - only ids, the outcome enum, and
  * the redaction-safe strings already written by auditDetail() (sync/decide.ts).
@@ -86,7 +90,7 @@ const NO_DETAIL = "Employment Hero flagged this record - see the audit log.";
 export function deriveRosterEntry(row: RosterRow): RosterEntry {
   const base = { ctUserId: row.ctUserId, ehEmployeeId: row.ehEmployeeId };
 
-  if (row.latestOutcome === "dead_letter") {
+  if (row.latestOutcome === "dead_letter" || row.latestOutcome === "collision") {
     return {
       ...base,
       state: "broken",

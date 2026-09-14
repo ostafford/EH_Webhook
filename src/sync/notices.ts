@@ -21,7 +21,7 @@
 import { sha256Hex } from "./canonical.js";
 import type { SyncGateway } from "./gateway.js";
 
-export type NoticeKind = "follow_up" | "system_alert";
+export type NoticeKind = "follow_up" | "system_alert" | "collision";
 
 /** A follow-up can wait on a payroll admin for a while - at most twice a day. */
 export const FOLLOW_UP_NOTICE_DEDUPE_MS = 12 * 60 * 60 * 1000;

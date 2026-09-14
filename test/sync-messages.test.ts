@@ -4,6 +4,7 @@ import {
   managerEscalationMessage,
   followUpNoticeMessage,
   systemAlertMessage,
+  collisionAlertMessage,
   friendlyLine,
   GENERIC_CORRECTION,
   personLabel,
@@ -140,6 +141,18 @@ describe("systemAlertMessage", () => {
 
   it("copes with an empty detail", () => {
     expect(systemAlertMessage("", { ctUserId: 42 })).toContain("No further detail");
+  });
+});
+
+describe("collisionAlertMessage", () => {
+  it("names both the EH employee id and the other Connecteam user, and says no employee action is possible", () => {
+    const msg = collisionAlertMessage("14246310", { ctUserId: 17760361, firstName: "Noah", lastName: "Davidson" }, 14504723);
+    expect(msg.length).toBeLessThanOrEqual(500);
+    expect(msg).toContain("Noah Davidson (17760361)");
+    expect(msg).toContain("14246310");
+    expect(msg).toContain("14504723");
+    expect(msg).toMatch(/Tax File Number/i);
+    expect(msg).toMatch(/No employee action is possible/);
   });
 });
 

@@ -8,7 +8,14 @@ import type { CycleStore } from "./cycles.js";
 import type { RosterRow } from "../status/roster.js";
 
 /** Matches the `sync_log.outcome` enum in {@link ../db/schema}. */
-export type SyncOutcomeLabel = "ok" | "correction" | "follow_up" | "retry" | "dead_letter" | "resolved";
+export type SyncOutcomeLabel =
+  | "ok"
+  | "correction"
+  | "follow_up"
+  | "retry"
+  | "dead_letter"
+  | "resolved"
+  | "collision";
 
 /** One row of `employee_map`, as the consumer reads it. */
 export interface EmployeeLink {
@@ -58,6 +65,19 @@ export interface SyncGateway extends CycleStore {
    * approval signal.
    */
   hasBeenApproved(ctUserId: number): Promise<boolean>;
+  /**
+   * The Connecteam userId already linked to this EH employee id, if any -
+   * detects a TFN (or other identity-field) collision. Employment Hero's
+   * unstructured-employee endpoint matches/merges by TFN internally: a POST
+   * for a brand-new `externalId` can still land on and silently overwrite an
+   * EXISTING employee (even relabelling its `externalId`) if the TFN matches.
+   * Our own read-back check can't catch this - EH also updates the
+   * `externalId` on the merged record, so a read-back-by-externalId finds
+   * exactly what we just sent. Checked after every successful write; a result
+   * other than `null`/the current ctUserId means two Connecteam people just
+   * got merged into one EH record.
+   */
+  findByEhEmployeeId(ehEmployeeId: string): Promise<number | null>;
   /** Add `delta` to an operational counter for /health (queue backlog etc.). */
   bumpCounter(key: string, delta: number): Promise<void>;
   /** Read named `sync_meta` counters/markers; missing keys come back as 0. */

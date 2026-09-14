@@ -42,6 +42,16 @@ export class SyncStore implements SyncGateway {
     };
   }
 
+  /** The Connecteam userId already linked to this EH employee id, if any (collision check). */
+  async findByEhEmployeeId(ehEmployeeId: string): Promise<number | null> {
+    const [row] = await this.#db
+      .select({ ctUserId: employeeMap.ctUserId })
+      .from(employeeMap)
+      .where(eq(employeeMap.ehEmployeeId, ehEmployeeId))
+      .limit(1);
+    return row?.ctUserId ?? null;
+  }
+
   async saveEmployeeLink(patch: EmployeeLinkPatch): Promise<void> {
     const now = Date.now();
     const lastOutcome = patch.lastOutcome ?? null;

@@ -22,6 +22,7 @@ import {
   managerEscalationMessage,
   followUpNoticeMessage,
   systemAlertMessage,
+  collisionAlertMessage,
   type PersonRef,
 } from "./messages.js";
 import { advanceCycle, directManagerUserId } from "./cycles.js";
@@ -51,7 +52,7 @@ export interface SyncDeps {
   onSystemAlert?: (info: { ctUserId: number; reason: string }) => Promise<void>;
 }
 
-export type SyncJobStatus = "synced" | "correction" | "follow_up" | "skipped" | "retry";
+export type SyncJobStatus = "synced" | "correction" | "follow_up" | "skipped" | "retry" | "collision";
 
 export interface SyncJobOutcome {
   status: SyncJobStatus;
@@ -168,6 +169,41 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     let readBack: ReadBackResult | undefined;
     if (write.outcome === "ok") {
       ehEmployeeId = String(write.data.id);
+
+      // Employment Hero's unstructured-employee endpoint matches/merges by TFN
+      // internally - a write for a brand-new externalId can still land on and
+      // silently overwrite an EXISTING employee (even relabelling its
+      // externalId) if the TFN collides. The read-back below can't catch this:
+      // EH relabels the merged record's externalId too, so a read-back-by-
+      // externalId finds exactly what we just sent. Check employee_map instead.
+      const collidingCtUserId = await deps.store.findByEhEmployeeId(ehEmployeeId);
+      if (collidingCtUserId !== null && collidingCtUserId !== ctUserId) {
+        const key = await noticeKey("collision", ctUserId, [ehEmployeeId]);
+        if (await shouldPostNotice(deps.store, key, SYSTEM_ALERT_NOTICE_DEDUPE_MS, now())) {
+          await deps.ct.sendChannelMessage(
+            deps.adminChannelId,
+            collisionAlertMessage(
+              ehEmployeeId,
+              { ctUserId, firstName: user.firstName, lastName: user.lastName },
+              collidingCtUserId,
+            ),
+          );
+        }
+        await deps.store.appendSyncLog({
+          ctUserId,
+          at: now(),
+          outcome: "collision",
+          detail: `collision: EH employee ${ehEmployeeId} already linked to Connecteam user ${collidingCtUserId}`,
+        });
+        // Deliberately not saved as a link and the failure cycle is left
+        // untouched - this isn't a normal sync outcome for this person, it's
+        // two people's records needing a human to untangle them in EH.
+        return {
+          status: "collision",
+          reason: `EH employee ${ehEmployeeId} already linked to Connecteam user ${collidingCtUserId}`,
+        };
+      }
+
       const rb = await deps.eh.getByExternalId(mapped.externalId);
       if (rb.outcome === "ok" && rb.data) {
         readBack = compareReadBack(

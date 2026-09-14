@@ -136,6 +136,23 @@ export function systemAlertMessage(detail: string, ref: PersonRef): string {
   return clamp(body);
 }
 
+/**
+ * System alert -> the admin channel, when a write lands on an EH employee id
+ * already linked to a DIFFERENT Connecteam user. Employment Hero's
+ * unstructured-employee endpoint matches/merges by TFN internally, so two
+ * people who happen to share a TFN (a data-entry mistake, a placeholder value
+ * never replaced) can get silently spliced into one EH record - see
+ * `SyncGateway.findByEhEmployeeId`.
+ */
+export function collisionAlertMessage(ehEmployeeId: string, ref: PersonRef, otherCtUserId: number): string {
+  const body = [
+    `Payroll sync for ${personLabel(ref)} landed on Employment Hero employee ${ehEmployeeId}, which is already linked to a different Connecteam user (id ${otherCtUserId}).`,
+    "Employment Hero likely matched them by a duplicate value (e.g. the same Tax File Number) instead of creating a separate record.",
+    "No employee action is possible - a payroll admin must check and separate these two records directly in Employment Hero.",
+  ].join("\n");
+  return clamp(body);
+}
+
 function clamp(text: string): string {
   const t = text.trim();
   return t.length <= MAX_LEN ? t : `${t.slice(0, MAX_LEN - 1)}…`;

@@ -398,6 +398,19 @@ Silent but for a one-line "all clear" when everyone is `ready`.
 | **Correction message** | the employee (DM); + Direct manager on the 3rd failed attempt in a row | the employee fixes the named field(s) in Connecteam; **their next profile edit re-syncs** (see below) |
 | **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** — re-posted at most once per ~12 h per employee per reason-set |
 | **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job — re-posted at most once per hour per employee while the fault persists |
+| **Identity-collision alert** | alerts channel | two Connecteam people's EH records got merged into one (see below) — separate them directly in EH; re-posted at most once per hour per employee while it persists |
+
+> **Identity-collision alert.** Employment Hero's unstructured-employee endpoint
+> matches/merges by **Tax File Number**, not by the `externalId` this sync sends
+> — so if two people ever share a TFN (a data-entry mistake, a placeholder value
+> nobody replaced), the second person's sync silently lands on and overwrites
+> the first person's EH record, and EH even relabels that record's `externalId`
+> to the second person's id. Nothing about the write itself looks wrong to the
+> sync — it only shows up because we separately track which Connecteam user
+> already owns each EH employee id (`employee_map`). No employee action is
+> possible; a payroll admin must check both people's records in EH directly.
+> This never shows up in `/status` as `waiting_on_admin` — it surfaces as
+> `broken`, the same bucket as a dead-lettered job.
 
 ### Re-syncing an employee
 A resync is triggered by a **profile edit** in Connecteam (the `user_updated`

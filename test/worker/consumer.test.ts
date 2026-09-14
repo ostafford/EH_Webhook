@@ -127,6 +127,34 @@ describe("queue consumer (in workerd, real D1)", () => {
     expect(audit.results.map((r) => r.outcome)).toEqual(["ok"]);
   });
 
+  it("detects an EH identity collision (two Connecteam users resolving to the same EH employee id)", async () => {
+    // First employee syncs cleanly and owns EH employee 987 (world()'s fake
+    // always assigns id 987, standing in for Employment Hero matching two
+    // people by TFN and merging them onto one record).
+    await runSyncJob(job({ ctUserId: 17760356 }), world().deps);
+
+    const secondUser = structuredClone(syntheticUser);
+    secondUser.userId = 999999;
+    const w2 = world({ ctUser: secondUser });
+
+    const out = await runSyncJob(job({ ctUserId: 999999, eventTimestamp: 2000 }), w2.deps);
+
+    expect(out).toMatchObject({ status: "collision" });
+    expect(out.reason).toContain("987");
+    expect(out.reason).toContain("17760356");
+    expect(w2.sent.channels).toHaveLength(1);
+    expect(w2.sent.channels[0]!.text).toMatch(/already linked to a different Connecteam user/);
+
+    // The second user was never saved as owning employee 987.
+    const row = await env.DB.prepare("SELECT eh_employee_id FROM employee_map WHERE ct_user_id = 999999")
+      .first<{ eh_employee_id: string | null } | null>();
+    expect(row).toBeNull();
+
+    const audit = await env.DB.prepare("SELECT outcome FROM sync_log WHERE ct_user_id = 999999")
+      .all<{ outcome: string }>();
+    expect(audit.results.map((r) => r.outcome)).toEqual(["collision"]);
+  });
+
   it("updates the same record on a newer event and no-ops a replay", async () => {
     await runSyncJob(job({ eventTimestamp: 1000 }), world().deps);
 

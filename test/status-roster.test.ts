@@ -81,6 +81,22 @@ describe("deriveRosterEntry", () => {
     });
   });
 
+  it("is broken when the latest sync_log row is an EH identity collision", () => {
+    const r = row({
+      ehEmployeeId: null,
+      failureCycleCount: null,
+      lastOutcome: null,
+      latestOutcome: "collision",
+      latestDetail: "collision: EH employee 555 already linked to Connecteam user 99999",
+    });
+    expect(deriveRosterEntry(r)).toEqual({
+      ctUserId: 100,
+      ehEmployeeId: null,
+      state: "broken",
+      reasons: ["collision: EH employee 555 already linked to Connecteam user 99999"],
+    });
+  });
+
   it("is broken for a person with no employee_map row at all (dead-lettered on their first-ever attempt)", () => {
     const r = row({
       ehEmployeeId: null,
