@@ -4,7 +4,13 @@
   "employmentHero": {
     "businessId": "555455",
     "payScheduleId": "32407",
-    "locationId": "436590"
+    "locationId": "436590",
+    "defaults": {
+      "paySchedule": "Weekly",
+      "primaryLocation": "Connecteam",
+      "primaryPayCategory": "Permanent Ordinary Hours"
+    },
+    "payRateTemplate": { "source": "connecteamField" }
   },
   "identity": { "externalIdFrom": "userId", "emailFallbackFrom": "email" },
   "fields": [
@@ -45,7 +51,8 @@
     { "eh": "taxFileNumber", "from": { "customFieldId": 42923222 }, "transform": "digits", "required": true, "sensitive": true },
     { "eh": "bankAccount1_AccountName", "from": { "customFieldId": 42921173 }, "transform": "trimString", "sensitive": true },
     { "eh": "bankAccount1_BSB", "from": { "customFieldId": 42923223 }, "transform": "zeroPad6", "sensitive": true },
-    { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true }
+    { "eh": "bankAccount1_AccountNumber", "from": { "customFieldId": 42921172 }, "transform": "digits", "sensitive": true },
+    { "eh": "payRateTemplate", "from": { "customFieldId": 43504863 }, "transform": "trimString" }
   ],
   "rules": {
     "taxDeclaration": {
