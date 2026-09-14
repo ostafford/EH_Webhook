@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json",
     "deploy": "wrangler deploy",
     "discover": "tsx scripts/discover.ts",
+    "provision-classification-field": "tsx scripts/provision-award-classification-field.ts",
     "test:integration": "vitest run --project integration",
     "test:all": "vitest run"
   },
