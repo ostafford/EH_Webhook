@@ -37,3 +37,23 @@ approval are handled separately by the `user_updated` webhook.
 - We depend on the observed meaning of `status: completed` == approved. If
   Connecteam changes that, the trigger breaks silently — covered by an alert if
   the daily approved-count drops to zero unexpectedly.
+
+## Update 2026-09-14
+
+"Ongoing edits after approval are handled separately by the `user_updated`
+webhook" (above) was the stated intent from day one, but nothing enforced the
+"after" half of it — `runSyncJob` treated every `user_updated` delivery as
+sync-worthy regardless of approval state. In practice, Connecteam fires
+`user_updated` on every field save, including mid-onboarding, before a pack is
+ever submitted for review. Filling out a pack one field at a time therefore ran
+a full sync attempt per field — writing partial data to EH and sending a fresh
+Correction or Manual-follow-up on nearly every save. Found live while
+onboarding a real test employee (~messages per field, extrapolated to ~300
+onboarding employees).
+
+Fixed in `runSyncJob` (`src/sync/consumer.ts`): a `profile_update` job now
+checks `onboarding_state` (`SyncGateway.hasBeenApproved`) and silently skips -
+no EH write, no message, no audit row - unless this person's assignment has
+reached `status: completed` at least once. `approval` jobs are never gated:
+the sweep enqueuing one *is* the completed-transition signal, and gating it
+too would race against the sweep's own `writeState` call for the same tick.

@@ -411,6 +411,16 @@ mandatory, not optional. To force a resync for an employee whose profile hasn't
 changed, edit any field on their Connecteam profile (an identical re-save is
 deduplicated and does nothing).
 
+> **Edits before a pack is Approved never sync (by design).** The
+> `user_updated` webhook fires on every field save, including mid-onboarding -
+> before an employee has even submitted their pack for review. The sync
+> silently ignores every one of these (no EH write, no message) until
+> `onboarding_state` shows the pack reached `completed` at least once (see
+> ADR-0002). Without this, someone filling out a dozen-plus fields one at a
+> time would trigger a fresh Correction or Manual-follow-up on nearly every
+> field, and every partial edit would land in EH before the record was ever
+> meant to exist there.
+
 ### Replaying a dead-lettered job
 A message on `eh-webhook-dlq` has already raised a System alert. After fixing the
 cause, re-drive it with `wrangler queues`, or re-trigger the source edit in

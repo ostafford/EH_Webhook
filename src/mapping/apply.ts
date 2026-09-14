@@ -52,6 +52,18 @@ export interface MappingResult {
    */
   payRunIssues: string[];
   /**
+   * True when `payRunIssues` reflects a field-map misconfiguration (the
+   * location axis - `defaults.paySchedule` / `primaryLocation` /
+   * `primaryPayCategory` - is blank), which affects every employee identically
+   * and is never something the sync should paper over with a per-employee
+   * write. False when the only gap is the per-employee rate axis (no
+   * classification picked yet / no Connecteam pay rate on file) - a real data
+   * gap for this one person, not a config bug, so the record still gets
+   * created/updated (without pay-run keys) and the gap is reported as a
+   * follow-up rather than blocking their entire EH record.
+   */
+  payRunBlocking: boolean;
+  /**
    * True when the complete pay-run set resolved for this record: the location
    * axis (`paySchedule` + `primaryLocation` + `primaryPayCategory`) plus the
    * rate axis (`rate` + `rateUnit`, OR a `payRateTemplate` that EH derives them
@@ -216,7 +228,7 @@ function applyPayRun(
   payload: Record<string, PayloadValue>,
   eh: FieldMap["employmentHero"],
   payRate: PayRateInput | null | undefined,
-): { complete: boolean; issues: string[] } {
+): { complete: boolean; issues: string[]; blocking: boolean } {
   const { defaults } = eh;
 
   if (defaults) {
@@ -228,15 +240,19 @@ function applyPayRun(
   if (!eh.perEmployeeRate && !eh.payRateTemplate) {
     // Pure-defaults mode: complete only if `defaults` carried both axes itself
     // (`payRunComplete` accepts a `defaults.payRateTemplate` as the rate axis).
-    return { complete: payRunComplete(payload), issues: [] };
+    return { complete: payRunComplete(payload), issues: [], blocking: false };
   }
 
-  const issues: string[] = [];
+  // Kept separate so a per-employee data gap (rate axis) never blocks the
+  // whole EH write the way a field-map misconfiguration (location axis) does
+  // - see `payRunBlocking` on {@link MappingResult}.
+  const rateIssues: string[] = [];
+  const locationIssues: string[] = [];
 
   if (eh.perEmployeeRate) {
     const rate = resolvePerEmployeeRate(payRate);
     if ("issue" in rate) {
-      issues.push(rate.issue);
+      rateIssues.push(rate.issue);
     } else {
       payload.rate = rate.rate;
       payload.rateUnit = rate.rateUnit;
@@ -249,7 +265,7 @@ function applyPayRun(
     delete payload.rate;
     delete payload.rateUnit;
     if (isBlank(payload.payRateTemplate)) {
-      issues.push(
+      rateIssues.push(
         "This employee has no pay rate template (award classification) set in " +
           "Connecteam. Set it on their profile, or set the pay rate in " +
           "Employment Hero by hand.",
@@ -259,7 +275,7 @@ function applyPayRun(
 
   for (const k of PAY_RUN_LOCATION) {
     if (isBlank(payload[k])) {
-      issues.push(
+      locationIssues.push(
         `Pay-run "${k}" is not configured in the field-map ` +
           `(employmentHero.defaults.${k}) - it is required for every employee ` +
           `once perEmployeeRate or payRateTemplate is enabled.`,
@@ -267,12 +283,13 @@ function applyPayRun(
     }
   }
 
+  const issues = [...locationIssues, ...rateIssues];
   if (issues.length > 0) {
     // Never send EH a partial pay-run set - drop every pay-run key.
     for (const k of PAY_RUN_ALL) delete payload[k];
-    return { complete: false, issues };
+    return { complete: false, issues, blocking: locationIssues.length > 0 };
   }
-  return { complete: true, issues: [] };
+  return { complete: true, issues: [], blocking: false };
 }
 
 /**
@@ -348,11 +365,11 @@ export function applyFieldMap(
   // on) `defaults` + this employee's Connecteam pay rate. EH validates the set
   // all-or-nothing and ignores the legacy `payScheduleId` / `locationId` keys
   // entirely (issue #34), so a partial set is never emitted (issues #26, #42).
-  const { complete: payRunDefaultsComplete, issues: payRunIssues } = applyPayRun(
-    acc.payload,
-    map.employmentHero,
-    opts.payRate,
-  );
+  const {
+    complete: payRunDefaultsComplete,
+    issues: payRunIssues,
+    blocking: payRunBlocking,
+  } = applyPayRun(acc.payload, map.employmentHero, opts.payRate);
 
   const externalId = String(user.userId);
   acc.payload.externalId = externalId;
@@ -373,6 +390,7 @@ export function applyFieldMap(
     issues: acc.issues,
     followUps: acc.followUps,
     payRunIssues,
+    payRunBlocking,
     payRunDefaultsComplete,
   };
 }

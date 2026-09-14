@@ -156,6 +156,9 @@ describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
     expect(r.payRunIssues[0]).toMatch(/no pay rate/i);
     expect(r.payRunDefaultsComplete).toBe(false);
     expect(r.issues).toEqual([]); // admin/config, not an employee-facing correction
+    // A per-employee data gap, not a field-map misconfiguration - the sync
+    // still creates/updates the record (safety net), just without pay-run keys.
+    expect(r.payRunBlocking).toBe(false);
     for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory", "rate", "rateUnit"]) {
       expect(r.payload[k as keyof typeof r.payload]).toBeUndefined();
     }
@@ -209,6 +212,9 @@ describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
     expect(r.payRunIssues.some((s) => s.includes("primaryPayCategory"))).toBe(true);
     expect(r.payload.rate).toBeUndefined();
     expect(r.payload.paySchedule).toBeUndefined();
+    // A field-map misconfiguration (affects every employee identically) - blocks
+    // the whole write, unlike a per-employee rate/classification gap.
+    expect(r.payRunBlocking).toBe(true);
   });
 
   it("carries a per-employee hoursPerWeek number field, and strips it when the set fails", () => {
@@ -320,6 +326,9 @@ describe("applyFieldMap - employmentHero.payRateTemplate (issue #39)", () => {
     expect(r.payRunIssues[0]).toMatch(/no pay rate template/i);
     expect(r.payRunDefaultsComplete).toBe(false);
     expect(r.issues).toEqual([]); // admin/config, not an employee-facing correction
+    // No classification picked yet is a per-employee data gap, not a
+    // misconfiguration - the record still gets created/updated (safety net).
+    expect(r.payRunBlocking).toBe(false);
     for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory", "payRateTemplate"]) {
       expect(r.payload[k as keyof typeof r.payload]).toBeUndefined();
     }
@@ -342,6 +351,7 @@ describe("applyFieldMap - employmentHero.payRateTemplate (issue #39)", () => {
     expect(r.payRunIssues.some((s) => s.includes("primaryPayCategory"))).toBe(true);
     expect(r.payload.payRateTemplate).toBeUndefined();
     expect(r.payload.paySchedule).toBeUndefined();
+    expect(r.payRunBlocking).toBe(true);
   });
 
   it("a company-wide defaults.payRateTemplate satisfies the rate axis on its own", () => {

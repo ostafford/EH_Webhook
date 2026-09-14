@@ -709,15 +709,41 @@ describe("runSyncJob - per-employee pay rate (issue #42)", () => {
     expect(out.status).toBe("synced");
   });
 
-  it("no pay rate on file: raises a follow-up to the admin channel and writes nothing to EH", async () => {
+  it("no pay rate on file: still creates the EH record (without pay-run keys) and raises a follow-up", async () => {
+    // A missing per-employee rate is a data gap, not a field-map misconfiguration
+    // (the location axis is fine) - the record still gets created/updated as a
+    // safety net, just without any pay-run keys, same as a client who never
+    // configured a rate axis at all.
     const ct = mkCt({ outcome: "ok", data: null });
-    const eh = fakeEh();
+    const eh = fakeEh({ id: 7, created: true });
     const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: rateMap }));
 
-    expect(eh.upserts).toHaveLength(0);
+    expect(eh.upserts).toHaveLength(1);
+    expect(eh.upserts[0]!.payload).not.toHaveProperty("rate");
+    expect(eh.upserts[0]!.payload).not.toHaveProperty("rateUnit");
+    expect(eh.upserts[0]!.payload).not.toHaveProperty("paySchedule");
     expect(out.status).toBe("follow_up");
     expect(ct.channels).toHaveLength(1);
     expect(ct.channels[0]!.text).toMatch(/pay rate/i);
+  });
+
+  it("a missing location-axis default (field-map misconfiguration) still blocks the whole write", async () => {
+    const misconfigured = parseFieldMap({
+      ...fieldMap,
+      employmentHero: {
+        businessId: "555455",
+        defaults: { paySchedule: "Weekly", primaryLocation: "Connecteam" }, // no primaryPayCategory
+        perEmployeeRate: { source: "connecteamPayRate" },
+      },
+    });
+    const ct = mkCt({ outcome: "ok", data: { rateType: "hourly", defaultRate: 40, isDefaultRateEnabled: true } });
+    const eh = fakeEh();
+
+    const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: misconfigured }));
+
+    expect(eh.upserts).toHaveLength(0);
+    expect(out.status).toBe("follow_up");
+    expect(out.reason).toMatch(/primaryPayCategory/);
   });
 
   it("retries when the pay-rates API is unavailable", async () => {

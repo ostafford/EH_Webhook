@@ -142,10 +142,17 @@ and an optional `hoursPerWeek` from a per-employee `number` field rule. See
   employee and sends no pay-run keys. One quirk found: EH read back `6500` sent
   as `6499.99931` — an internal rounding artefact on its side (likely a
   weekly/annual-equivalent conversion), not something the sync can avoid.
-- **All-or-nothing preserved.** If any required pay-run field can't be resolved
-  for an employee (no pay rate on file, disabled default rate, an unmapped
-  `rateType`, missing `defaults` name), `applyFieldMap` emits **no** pay-run keys
-  and the sync raises one follow-up — EH is never sent a partial set.
+- **All-or-nothing preserved, but only the pay-run keys.** If the RATE axis
+  can't be resolved for an employee (no pay rate on file, disabled default rate,
+  an unmapped `rateType`, no classification picked yet), `applyFieldMap` emits
+  **no** pay-run keys - EH is never sent a partial set - but the record's other
+  fields still get created/updated as normal, with one follow-up raised instead
+  of the pay-run keys. Only a missing LOCATION-axis name in `defaults`
+  (`paySchedule` / `primaryLocation` / `primaryPayCategory`) still blocks the
+  whole write: that's a field-map misconfiguration affecting every employee
+  identically, not a per-person data gap, so nothing is sent at all until it's
+  fixed (`MappingResult.payRunBlocking` in `src/mapping/apply.ts` carries this
+  distinction).
 - **`classification` / award classification** — resolved by #39 (probed
   2026-09-10 against `awardId: 1`). The accepted key is **`payRateTemplate`**,
   the template **name** (which encodes classification + level + age +
@@ -168,10 +175,23 @@ For an **award-covered** client the split is:
 
 **Built (issue #39).** Opt in with `employmentHero.payRateTemplate:
 { source: "connecteamField" }` plus a `fields[]` rule `{ eh: "payRateTemplate",
-from: { customFieldId: <admin field> }, transform: "trimString" }`. `applyFieldMap`
-then treats the template name as the rate axis (drops any explicit `rate` /
-`rateUnit`), keeps the location axis from `defaults`, and is all-or-nothing — a
-blank template for an employee raises one admin follow-up, no partial write.
-Mutually exclusive with `perEmployeeRate`. A single-classification workforce can
-instead set `employmentHero.defaults.payRateTemplate` (string) directly. See
+from: { customFieldId: <admin field> }, transform: "dropdownValue" }` if the
+Connecteam field is a dropdown (the norm - see
+`scripts/provision-award-classification-field.ts`, which provisions exactly
+that: an admin-only dropdown seeded from EH's own `payratetemplate` list), or
+`transform: "trimString"` for a plain free-text field. **Getting this wrong is a
+silent trap, not a schema error**: a dropdown custom field's Connecteam value is
+`[{id, value}]`, not a string - `trimString` throws `"expected a string, got
+object"` on it, which the sync then reports as a Correction to the *employee*
+(a config problem misrouted as if it were their mistake), not a follow-up to
+the admin. `applyFieldMap` treats the resolved template name as the rate axis
+(drops any explicit `rate` / `rateUnit`) and keeps the location axis from
+`defaults`; the whole pay-run key set is still all-or-nothing (never a partial
+set sent to EH). A blank template for one employee raises an admin follow-up
+but no longer blocks their EH record from being created/updated at all - only
+a misconfigured *location* axis (`defaults.paySchedule` / `primaryLocation` /
+`primaryPayCategory`, which affects every employee identically) still blocks
+the whole write. Mutually exclusive with `perEmployeeRate`. A
+single-classification workforce can instead set
+`employmentHero.defaults.payRateTemplate` (string) directly. See
 [`adr/0004-award-classification-as-a-pay-rate-template.md`](./adr/0004-award-classification-as-a-pay-rate-template.md).

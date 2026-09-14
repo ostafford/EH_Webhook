@@ -142,11 +142,22 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
   if (mapped.issues.length > 0) {
     // The payload never leaves the Worker - the employee must fix it first.
     decision = decide({ mappingIssues: mapped.issues });
-  } else if (mapped.payRunIssues.length > 0) {
-    // Pay-run set could not be completed (issue #42). EH 400s a partial set, so
-    // nothing is sent; the reasons go to the admin channel as one follow-up.
+  } else if (mapped.payRunIssues.length > 0 && mapped.payRunBlocking) {
+    // The pay-run LOCATION axis (defaults.paySchedule/primaryLocation/
+    // primaryPayCategory) is unresolved - a field-map misconfiguration, not a
+    // per-employee gap. EH 400s a partial set, so nothing is sent; the reasons
+    // go to the admin channel as one follow-up instead.
     decision = decide({ payRunUnresolved: mapped.payRunIssues, followUps: mapped.followUps });
   } else {
+    // Either the pay-run set is fully resolved, or the only gap is the
+    // per-employee RATE axis (no classification picked yet / no Connecteam pay
+    // rate on file) - a data gap for this one person, not a config bug. Create
+    // or update their EH record now regardless (without pay-run keys, same as a
+    // client who never configured a rate axis at all) and surface the gap as a
+    // follow-up rather than leaving them absent from EH until someone gets to
+    // it - safety net for a skipped admin field or a renamed award template.
+    const followUps = [...mapped.payRunIssues, ...mapped.followUps];
+
     // Match order: stored link -> externalId (both handled by upsertByExternalId).
     // Email fallback for the very first match is deferred - it needs an EH
     // employee-search endpoint that issue #2 did not build/verify.
@@ -168,7 +179,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     }
     decision = decide({
       write,
-      followUps: mapped.followUps,
+      followUps,
       payRunDefaultsComplete: mapped.payRunDefaultsComplete,
       ...(readBack ? { readBack } : {}),
     });
