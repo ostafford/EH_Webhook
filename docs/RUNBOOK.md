@@ -356,6 +356,29 @@ ops, at }` — and is passed through `src/redact.ts` regardless. Leave
 Full request / queue / sweep detail is in the Cloudflare **Workers Logs** for the
 Worker — one JSON line per event, every line passed through `src/redact.ts` first.
 
+### External health watch — GitHub Actions
+
+`/health` is also polled every 10 minutes by
+[`.github/workflows/health-watch.yml`](../.github/workflows/health-watch.yml),
+running on GitHub's infrastructure rather than the client's Cloudflare account.
+This exists because the Sync's own **System alert** is sent over Connecteam
+chat — so a broken `CT_API_KEY` silently breaks the alert about itself too (this
+happened for real: ~15h of failed sweeps with no notice, see §14 of the
+deployment history). The workflow checks are independent of both `CT_API_KEY`
+and `EH_API_KEY`, and a failed run emails whoever GitHub notifies on workflow
+failures for the repo (check **Settings → Notifications → Actions** on
+github.com).
+
+It fails the run — and so sends the email — when any of:
+
+- `/health` doesn't return `200` with `ok: true`
+- `ops.lastSweepOkAt` is more than 15 minutes stale
+- `ops.broken` is above `0`
+
+Point it at a different deployment by setting the repository variable
+`HEALTH_URL` (Settings → Secrets and variables → Actions → Variables); it
+defaults to this client's `self` Worker URL otherwise.
+
 ### Sync-status roster — `GET /status`
 
 A standing view of every employee the sync has ever touched, so an admin can
