@@ -1,0 +1,61 @@
+name: Health watch
+
+# Independent watcher for the live Worker's `GET /health`. Runs from GitHub's
+# infra, not the Worker's - so a broken CT_API_KEY or EH_API_KEY (which also
+# breaks the Sync's own admin-channel alert, see ADR-0002/§14 incident) still
+# gets caught here. A failed run triggers GitHub's own workflow-failure email.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch /health
+        id: fetch
+        run: |
+          url="${{ vars.HEALTH_URL || 'https://eh-webhook.okky-mstafford.workers.dev/health' }}"
+          http_code=$(curl -sS -o body.json -w "%{http_code}" --max-time 15 "$url") || {
+            echo "request to $url failed outright (network/DNS/timeout)"; exit 1;
+          }
+          echo "http_code=$http_code"
+          cat body.json
+          if [ "$http_code" != "200" ]; then
+            echo "expected HTTP 200, got $http_code"
+            exit 1
+          fi
+
+      - name: Check health body
+        run: |
+          ok=$(jq -r '.ok' body.json)
+          if [ "$ok" != "true" ]; then
+            echo "/health reports ok=$ok"
+            exit 1
+          fi
+
+          last_sweep=$(jq -r '.ops.lastSweepOkAt' body.json)
+          if [ "$last_sweep" = "null" ] || [ -z "$last_sweep" ]; then
+            echo "ops.lastSweepOkAt is missing"
+            exit 1
+          fi
+
+          last_sweep_epoch=$(date -d "$last_sweep" +%s)
+          now_epoch=$(date -u +%s)
+          age_minutes=$(( (now_epoch - last_sweep_epoch) / 60 ))
+          echo "last successful sweep was ${age_minutes} minute(s) ago"
+
+          # sweep runs every 1 minute; 15 minutes gives headroom for GitHub
+          # Actions cron jitter before flagging a real outage.
+          if [ "$age_minutes" -gt 15 ]; then
+            echo "sweep is stale (>${age_minutes}m) - the cron sweep is likely stuck or the Worker can't reach Connecteam/EH"
+            exit 1
+          fi
+
+          broken=$(jq -r '.ops.broken // 0' body.json)
+          if [ "$broken" -gt 0 ]; then
+            echo "ops.broken=$broken - at least one employee record is dead-lettered or in identity collision"
+            exit 1
+          fi
