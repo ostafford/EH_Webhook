@@ -33,7 +33,7 @@
     {
       "binding": "DB",
       "database_name": "eh-webhook",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "2da451a0-fb39-477c-b076-69078b174924",
       "migrations_dir": "migrations"
     }
   ],
