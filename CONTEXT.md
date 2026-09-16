@@ -56,3 +56,14 @@ Everything the employee can enter in the onboarding pack: personal, address, eme
 
 **EH self-setup**:
 EH Payroll's `initiateselfservice` wizard. Considered and rejected — see ADR-0001. Not used.
+
+**Rehearsal deployment**:
+A second, independent clone-and-deploy of this repo — its own Cloudflare
+Worker/D1/queues, its own brand-new Connecteam and Employment Hero accounts —
+used to walk the setup wizard and `RUNBOOK.md` exactly as a real client would,
+before ever running them with an actual client. Kept running afterward,
+reusable for the next feature or client rather than torn down after one use.
+See ADR-0006.
+_Avoid_: staging, sandbox, test environment (too generic — this specifically
+means rehearsing the client-facing *setup* flow from scratch, not just a place
+to run automated tests)
