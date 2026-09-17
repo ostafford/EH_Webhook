@@ -286,9 +286,16 @@ set_jsonc ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: onboarding pack + webhook secret"
+say "An onboarding pack with an approval step must exist before continuing - the sync watches for a pack's approval to create the employee record in Employment Hero."
+say "Create one (or confirm one already exists) under Settings > Onboarding, with an approval step."
+pause "Press Enter once the onboarding pack exists."
 say "Onboarding packs on this account:"
-ct_api "/onboarding/v1/packs" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];for(const x of p)console.log("   ",x.id||x.packId,"  ",x.name||"(unnamed)")}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})'
+PACK_LIST=$(ct_api "/onboarding/v1/packs" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];if(!p.length){console.log("   (none found)");return}for(const x of p)console.log("   ",x.id||x.packId,"  ",x.name||"(unnamed)")}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})')
+printf '%s\n' "$PACK_LIST"
+if [[ "$PACK_LIST" == *"(none found)"* ]]; then
+  warn "No onboarding packs found - go create one with an approval step, then come back here."
+fi
 ask CT_ONBOARDING_PACK_ID "Paste the onboarding pack ID:"
 write_env CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
 set_jsonc CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
