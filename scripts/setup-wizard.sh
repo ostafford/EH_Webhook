@@ -245,9 +245,10 @@ banner "EH_Webhook - client deployment"
 # ─────────────────────────────────────────────────────────────────────────
 stage "Cloudflare account"
 say "This deployment runs on the CLIENT's own Cloudflare account."
-say "Queues need the Workers Paid plan (~\$5/mo)."
+say "If you don't have one yet, sign up on the page that's about to open - it's free."
+say "The sync pipeline uses Cloudflare Queues, which needs the Workers Paid plan (~\$5/mo)."
 open_url "https://dash.cloudflare.com/?to=/:account/workers/plans"
-confirm "Is this account on the Workers Paid plan?" || { warn "Upgrade first, then re-run."; exit 1; }
+confirm "Do you now have a Cloudflare account on the Workers Paid plan?" || { warn "Create an account and/or upgrade to Workers Paid on the page above, then re-run."; exit 1; }
 say "Logging wrangler in to that account (a browser tab will open)..."
 wr whoami >/dev/null 2>&1 || wr login
 wr whoami | sed 's/^/  /'
