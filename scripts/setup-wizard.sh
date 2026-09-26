@@ -278,8 +278,12 @@ say "A chat channel receives Manual-follow-up notices and System alerts."
 say "Create a channel named 'EH Sync Alerts' and add the payroll admins."
 pause "Press Enter once the channel exists."
 say "Chat channels on this account:"
-ct_api "/chat/v1/conversations" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=(JSON.parse(s).data?.conversations)||[];for(const x of c)console.log("   ",x.id,"  ",x.title||x.name||"(untitled)")}catch(e){console.log("   (could not list - open GET /chat/v1/conversations by hand)")}})'
+CHANNEL_LIST=$(ct_api "/chat/v1/conversations" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=(JSON.parse(s).data?.conversations)||[];if(!c.length){console.log("   (none found)");return}for(const x of c)console.log("   ",x.id,"  ",x.title||x.name||"(untitled)")}catch(e){console.log("   (could not list - open GET /chat/v1/conversations by hand)")}})')
+printf '%s\n' "$CHANNEL_LIST"
+if [[ "$CHANNEL_LIST" == *"(none found)"* ]]; then
+  warn "No chat channels found - go create 'EH Sync Alerts', then come back here."
+fi
 ask ADMIN_CONNECTEAM_CHANNEL_ID "Paste the 'EH Sync Alerts' channel ID:"
 write_env ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
 set_jsonc ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
