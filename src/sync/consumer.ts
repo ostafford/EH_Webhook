@@ -33,6 +33,7 @@ import {
   shouldPostNotice,
   FOLLOW_UP_NOTICE_DEDUPE_MS,
   SYSTEM_ALERT_NOTICE_DEDUPE_MS,
+  CORRECTION_NOTICE_DEDUPE_MS,
 } from "./notices.js";
 import type { SyncGateway, SyncOutcomeLabel } from "./gateway.js";
 
@@ -223,33 +224,45 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
 
   if (decision.kind === "retry") return { status: "retry", reason: decision.detail };
 
-  const cycle = await advanceCycle(deps.store, ctUserId, decision);
-
   const person = { ctUserId, firstName: user.firstName, lastName: user.lastName };
 
   let managerNotified = false;
   let noticeSuppressed = false;
   if (decision.kind === "correction") {
-    await deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields));
-    if (cycle.action === "correction" && cycle.notifyManager) {
-      const managerId = directManagerUserId(user.customFields);
-      if (managerId !== null) {
-        await deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields, person));
-        managerNotified = true;
+    // Retry-safety: a queue redelivery of this exact job (a crash after the DM
+    // went out but before the ack) must not re-bump the failure-cycle count or
+    // re-message the employee/manager. Key on the mapped-payload hash rather
+    // than the decision's reasons, so a genuine subsequent edit - which always
+    // changes the hash - still gets its own Correction message.
+    const key = await noticeKey("correction", ctUserId, [hash]);
+    if (await shouldPostNotice(deps.store, key, CORRECTION_NOTICE_DEDUPE_MS, now())) {
+      const cycle = await advanceCycle(deps.store, ctUserId, decision);
+      await deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields));
+      if (cycle.action === "correction" && cycle.notifyManager) {
+        const managerId = directManagerUserId(user.customFields);
+        if (managerId !== null) {
+          await deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields, person));
+          managerNotified = true;
+        }
       }
-    }
-  } else if (decision.kind === "follow_up") {
-    // The record synced (safe defaults); a payroll admin still has to finish it
-    // by hand in EH. While that stays undone, every later profile edit lands
-    // here again with the same reason - post it once per window, not per edit.
-    const key = await noticeKey("follow_up", ctUserId, decision.reasons);
-    if (await shouldPostNotice(deps.store, key, FOLLOW_UP_NOTICE_DEDUPE_MS, now())) {
-      await deps.ct.sendChannelMessage(
-        deps.adminChannelId,
-        followUpNoticeMessage(decision.reasons, person),
-      );
     } else {
       noticeSuppressed = true;
+    }
+  } else {
+    await advanceCycle(deps.store, ctUserId, decision);
+    if (decision.kind === "follow_up") {
+      // The record synced (safe defaults); a payroll admin still has to finish it
+      // by hand in EH. While that stays undone, every later profile edit lands
+      // here again with the same reason - post it once per window, not per edit.
+      const key = await noticeKey("follow_up", ctUserId, decision.reasons);
+      if (await shouldPostNotice(deps.store, key, FOLLOW_UP_NOTICE_DEDUPE_MS, now())) {
+        await deps.ct.sendChannelMessage(
+          deps.adminChannelId,
+          followUpNoticeMessage(decision.reasons, person),
+        );
+      } else {
+        noticeSuppressed = true;
+      }
     }
   }
 

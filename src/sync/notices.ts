@@ -1,6 +1,8 @@
 /**
- * De-dup for the two admin-channel notices that otherwise repeat while a record
- * sits `Incomplete` (issue #27): a Manual-follow-up notice and a System alert.
+ * De-dup for notices that could otherwise repeat: the two admin-channel kinds
+ * that repeat while a record sits `Incomplete` (issue #27) - a Manual-follow-up
+ * notice and a System alert - plus the employee-facing Correction message,
+ * which can repeat on a queue retry of the exact same job (no relation to #27).
  *
  * Connecteam fires one `user_updated` per changed field, so every real profile
  * edit re-runs the sync. The mapped-payload hash in `consumer.ts` only skips
@@ -17,16 +19,29 @@
  * user per distinct reason-set - a few hundred at most for a single client, so
  * left unpruned; a `DELETE FROM sync_meta WHERE key LIKE 'notice:%' AND
  * num < <cutoff>` in the cron would clear them if it ever matters.
+ *
+ * The `correction` kind uses the same marker mechanism but a different key
+ * ingredient on purpose: `consumer.ts` passes the mapped-payload hash, not the
+ * decision's reasons. A genuine edit (even to an unrelated field) changes that
+ * hash, so this guard never suppresses a fresh Correction cycle attempt - it
+ * only catches a queue redelivery of the *exact same* job (a crash after the
+ * DM went out but before the ack), which would otherwise re-DM the employee
+ * and double-bump their failure-cycle count via `advanceCycle`.
  */
 import { sha256Hex } from "./canonical.js";
 import type { SyncGateway } from "./gateway.js";
 
-export type NoticeKind = "follow_up" | "system_alert" | "collision";
+export type NoticeKind = "correction" | "follow_up" | "system_alert" | "collision";
 
 /** A follow-up can wait on a payroll admin for a while - at most twice a day. */
 export const FOLLOW_UP_NOTICE_DEDUPE_MS = 12 * 60 * 60 * 1000;
 /** Repeated dead-letters for one user in an hour are one incident. */
 export const SYSTEM_ALERT_NOTICE_DEDUPE_MS = 60 * 60 * 1000;
+/**
+ * Only needs to outlast realistic queue-retry timing (`max_retries: 5`), not
+ * throttle genuine re-attempts - see the `correction` note above.
+ */
+export const CORRECTION_NOTICE_DEDUPE_MS = 60 * 60 * 1000;
 
 type MetaStore = Pick<SyncGateway, "readMeta" | "setMarker">;
 
