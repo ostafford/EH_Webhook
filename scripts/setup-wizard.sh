@@ -245,9 +245,10 @@ banner "EH_Webhook - client deployment"
 # ─────────────────────────────────────────────────────────────────────────
 stage "Cloudflare account"
 say "This deployment runs on the CLIENT's own Cloudflare account."
-say "Queues need the Workers Paid plan (~\$5/mo)."
+say "If you don't have one yet, sign up on the page that's about to open - it's free."
+say "The sync pipeline uses Cloudflare Queues, which needs the Workers Paid plan (~\$5/mo)."
 open_url "https://dash.cloudflare.com/?to=/:account/workers/plans"
-confirm "Is this account on the Workers Paid plan?" || { warn "Upgrade first, then re-run."; exit 1; }
+confirm "Do you now have a Cloudflare account on the Workers Paid plan?" || { warn "Create an account and/or upgrade to Workers Paid on the page above, then re-run."; exit 1; }
 say "Logging wrangler in to that account (a browser tab will open)..."
 wr whoami >/dev/null 2>&1 || wr login
 wr whoami | sed 's/^/  /'
@@ -277,17 +278,28 @@ say "A chat channel receives Manual-follow-up notices and System alerts."
 say "Create a channel named 'EH Sync Alerts' and add the payroll admins."
 pause "Press Enter once the channel exists."
 say "Chat channels on this account:"
-ct_api "/chat/v1/conversations" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=(JSON.parse(s).data?.conversations)||[];for(const x of c)console.log("   ",x.id,"  ",x.title||x.name||"(untitled)")}catch(e){console.log("   (could not list - open GET /chat/v1/conversations by hand)")}})'
+CHANNEL_LIST=$(ct_api "/chat/v1/conversations" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=(JSON.parse(s).data?.conversations)||[];if(!c.length){console.log("   (none found)");return}for(const x of c)console.log("   ",x.id,"  ",x.title||x.name||"(untitled)")}catch(e){console.log("   (could not list - open GET /chat/v1/conversations by hand)")}})')
+printf '%s\n' "$CHANNEL_LIST"
+if [[ "$CHANNEL_LIST" == *"(none found)"* ]]; then
+  warn "No chat channels found - go create 'EH Sync Alerts', then come back here."
+fi
 ask ADMIN_CONNECTEAM_CHANNEL_ID "Paste the 'EH Sync Alerts' channel ID:"
 write_env ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
 set_jsonc ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: onboarding pack + webhook secret"
+say "An onboarding pack with an approval step must exist before continuing - the sync watches for a pack's approval to create the employee record in Employment Hero."
+say "Create one (or confirm one already exists) under Settings > Onboarding, with an approval step."
+pause "Press Enter once the onboarding pack exists."
 say "Onboarding packs on this account:"
-ct_api "/onboarding/v1/packs" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];for(const x of p)console.log("   ",x.id||x.packId,"  ",x.name||"(unnamed)")}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})'
+PACK_LIST=$(ct_api "/onboarding/v1/packs" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];if(!p.length){console.log("   (none found)");return}for(const x of p)console.log("   ",x.id||x.packId,"  ",x.name||"(unnamed)")}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})')
+printf '%s\n' "$PACK_LIST"
+if [[ "$PACK_LIST" == *"(none found)"* ]]; then
+  warn "No onboarding packs found - go create one with an approval step, then come back here."
+fi
 ask CT_ONBOARDING_PACK_ID "Paste the onboarding pack ID:"
 write_env CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
 set_jsonc CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
