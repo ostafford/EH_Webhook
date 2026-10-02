@@ -402,6 +402,38 @@ describe("runSyncJob - correction path", () => {
     expect(out.status).toBe("synced");
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
   });
+
+  it("a queue retry of the same job (crash after the DM, before the state save) does not re-DM or double-bump the failure count", async () => {
+    const store = fakeGateway();
+    let failNextSave = true;
+    const originalSave = store.saveEmployeeLink.bind(store);
+    store.saveEmployeeLink = async (patch) => {
+      if (failNextSave) {
+        failNextSave = false;
+        throw new Error("D1 write failed");
+      }
+      return originalSave(patch);
+    };
+    const ct = fakeCt(cloneUser());
+    const eh = fakeEh({
+      write: { outcome: "validation", status: 400, issues: [{ field: "taxFileNumber", reason: "invalid" }] },
+    });
+    const attempt = () => runSyncJob(job(), deps({ store, eh, ct: ct as never }));
+
+    // Attempt 1: the correction DM goes out, then the job throws before its
+    // terminal state (lastSyncedTs/lastPayloadHash) is ever saved - exactly
+    // what leaves a queue redelivery looking like a first attempt.
+    await expect(attempt()).rejects.toThrow("D1 write failed");
+    expect(ct.dms).toHaveLength(1);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
+
+    // Attempt 2: the queue's retry of the identical message.
+    const out = await attempt();
+    expect(out.status).toBe("correction");
+    expect(out.noticeSuppressed).toBe(true);
+    expect(ct.dms).toHaveLength(1);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
+  });
 });
 
 describe("runSyncJob - follow-up path", () => {
