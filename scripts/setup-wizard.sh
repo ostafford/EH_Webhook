@@ -232,6 +232,17 @@ health_num() {
     });' "$1" 2>/dev/null || printf '0'
 }
 
+# health_str KEY: print the deployed Worker's /health ops.KEY as a string
+# (empty if absent, null or /health is unreachable). Needs $WORKER_URL.
+health_str() {
+  curl -fsS "${WORKER_URL}/health" 2>/dev/null | node -e '
+    const key = process.argv[1];
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try { const v = (JSON.parse(s).ops || {})[key]; process.stdout.write(v == null ? "" : String(v)); }
+      catch (e) { process.stdout.write(""); }
+    });' "$1" 2>/dev/null || printf ''
+}
+
 # ── prerequisites (before the banner, so a missing tool fails fast) ───────
 for _c in node npm npx git curl; do
   command -v "$_c" >/dev/null 2>&1 || { printf 'missing required tool: %s\n' "$_c" >&2; exit 1; }
@@ -521,6 +532,44 @@ say ""
 say "The signature scheme (header x-webhook-secret, no HMAC) was confirmed in"
 say "src/connecteam/signature.ts during #22."
 
+# The approval sweep is a Cron Trigger, and Cloudflare can take up to 15
+# minutes to start a new one after the first deploy (#69). Until it has run
+# once, an approved employee won't appear in EH - don't promise "~1 minute".
+sweep_at=""
+if [[ -n "${WORKER_URL:-}" ]]; then
+  sweep_at=$(health_str lastSweepOkAt)
+  if [[ -z "$sweep_at" ]]; then
+    say ""
+    say "The Worker checks Connecteam for approved packs every minute, but on a first"
+    say "deploy Cloudflare can take up to 15 minutes to start that check."
+    if confirm "Wait here until the first check has run (up to 16 minutes)"; then
+      printf '  %swaiting for the first check%s ' "$DIM" "$RESET"
+      waited=0
+      while (( waited < 960 )); do
+        sleep 15 ; waited=$(( waited + 15 ))
+        sweep_at=$(health_str lastSweepOkAt)
+        [[ -n "$sweep_at" ]] && break
+        (( waited % 60 == 0 )) && printf '%d min ' $(( waited / 60 )) || printf '.'
+      done
+      printf '\n'
+      if [[ -n "$sweep_at" ]]; then
+        printf '  %s✓ the first approval check ran (%s)%s\n' "$GREEN" "$sweep_at" "$RESET"
+      else
+        warn "the first check hasn't run after 16 minutes. Check $WORKER_URL/health:"
+        warn "ops.lastSweepOkAt should show a time; if it stays empty, see docs/RUNBOOK.md 'Verify'."
+        SKIPPED+=("Confirm the first approval check ran (ops.lastSweepOkAt on /health)")
+      fi
+    fi
+  fi
+fi
+
 finish
-say "Next: approve a test onboarding pack and watch the employee appear in Employment Hero within ~1 minute."
+if [[ -n "$sweep_at" ]]; then
+  say "Next: approve a test onboarding pack; the employee appears in Employment Hero within ~1 minute."
+else
+  say "Next: approve a test onboarding pack. The first approval check can take up to 15 minutes"
+  say "to start after a first deploy; once ops.lastSweepOkAt shows a time on"
+  say "$WORKER_URL/health, approvals appear in Employment Hero within ~1 minute."
+fi
+say "Profile edits after that sync within seconds (the webhook)."
 say "Ongoing updates: scripts/update.sh"
