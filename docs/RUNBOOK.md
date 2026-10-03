@@ -24,6 +24,12 @@ page, captures every value, provisions D1 + Queues, pushes the secrets and
 deploys. The sections below are the reference the wizard follows; read them once,
 then run the wizard.
 
+Each run is saved as **`setup-wizard-<date>-<time>.log`** in the repo folder
+(git-ignored, readable only by you): plain text, with every API key and secret
+from `.dev.vars` replaced by `[redacted]`. The screen clears at every stage, so
+this is the way to look back or to send the integrator what happened. It is only
+written when the wizard runs in a real terminal (it uses `script`).
+
 ---
 
 ## Prerequisites
