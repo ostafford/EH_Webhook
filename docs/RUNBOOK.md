@@ -302,14 +302,32 @@ curl -sS -X POST "https://api.connecteam.com/settings/v1/webhooks" \
 ```
 
 A `200` with `data.id` means it is registered. List them any time with
-`GET /settings/v1/webhooks` — the `enabled` flag there must be true.
+`GET /settings/v1/webhooks`; the webhook's `isDisabled` must be `false`.
+
+**Register once.** A second `POST` adds a second webhook (each edit is then
+delivered twice). To change the secret or turn it back on, update the existing
+one instead:
+
+```bash
+curl -sS -X PUT "https://api.connecteam.com/settings/v1/webhooks/<id>" \
+  -H "X-API-KEY: $CT_API_KEY" -H "content-type: application/json" \
+  -d '{"secretKey": "'"$CT_WEBHOOK_SECRET"'", "isDisabled": false}'
+```
+
+The wizard does this for you on a re-run (#82). It keeps the secret already in
+`.dev.vars`, updates a webhook that already points at the Worker instead of
+adding one, and offers to delete any extras. A fresh clone has no
+`.dev.vars`, so it generates a new secret. Its deploy pushes that to the Worker
+and its webhook stage updates Connecteam to match. Between the two, a few
+minutes apart, edits are rejected (`401`). Approvals are unaffected, because
+the sweep doesn't use the webhook.
 
 > **Confirm the first delivery.** The wizard's last stage prints the registered
 > entry and then offers a live check: edit any mapped field on a test profile
 > and it polls `/health` for ~90 s. `ops.webhookAccepted` going up means
 > Connecteam is delivering and the signature verifies; `ops.webhookRejected`
 > going up means a delivery arrived but its `secretKey` doesn't match
-> `CT_WEBHOOK_SECRET` (delete the webhook and re-register). Nothing after 90 s
+> `CT_WEBHOOK_SECRET` (re-run the wizard, or `PUT` the secret as above). Nothing after 90 s
 > usually means a wrong URL, a disabled webhook, or an unmapped field — inspect
 > with `npx wrangler tail --format pretty`.
 

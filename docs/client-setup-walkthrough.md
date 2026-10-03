@@ -58,10 +58,13 @@ None of these stop the setup, but expect a question about them on the call.
 | Stage 9 | "check EVERY mapped field ID" even when nothing differs; the award field listed "for review" | #66 |
 | Stages 11–12 | Raw wrangler output, and a migration prompt on a fresh install | #67 |
 | All stages | Dense text; little explanation of how each step connects to the next | #64 |
-| Stage 13 | A re-run registers a second webhook **and a new secret**; the old webhook then gets 401s | #82 |
 | Afterwards | No log file, so the client can't send you what the wizard showed | #83 |
 
-**Don't re-run the wizard to the end on a live deployment** until #82 is fixed.
+**Re-running the wizard on a live deployment** is safe for the webhook since
+#82. It keeps the existing secret and updates the existing webhook instead of
+adding one. A run from a **fresh clone** (no `.dev.vars`) still generates a new
+secret, so profile edits get a `401` for the few minutes between its deploy and
+its webhook stage.
 
 ## Rehearsal record
 
