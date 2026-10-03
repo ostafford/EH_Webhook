@@ -161,8 +161,11 @@ files below. It works on a fresh onboarding pack that nobody has filled in yet. 
 cover the whole account, and the API can't tell which fields are attached to
 the pack, so confirm that in the Connecteam UI.
 
-- **`clients/self/field-map.json`** — a schema-checked draft mapping (overwrites
-  the placeholder that ships in the repo).
+- **`clients/self/field-map.json`** — a schema-checked draft mapping. It replaces
+  the map that ships in the repo (set up for another account), but **never** a
+  map already set up for this account (same Connecteam pack + EH business):
+  then it writes `field-map.draft.json` beside it (git-ignored) and prints what
+  differs, so tuning such as pay-run defaults and the award field is kept.
 - **stdout** — a configuration checklist: every var and secret with the
   discovered value or a `TODO` and where to find it.
 
@@ -174,6 +177,21 @@ It writes field **names** and IDs only — never an employee value.
 - Resolve any `TODO` (usually the super field IDs and `EH_*` IDs).
 - Confirm the enum `map`s match the client's dropdown option text — `gender`,
   `residentialState` (incl. `INTERNATIONAL`), `employmentType`.
+
+**Then pick the pay-run settings** (the wizard's next stage):
+
+```bash
+npm run pay-defaults -- --client self
+```
+
+Lists the client's Employment Hero pay schedules, locations and primary pay
+categories and writes the chosen **names** into `employmentHero.defaults`, plus
+where each employee's pay rate comes from: the award classification (offered
+once the award field is mapped) or their Connecteam pay rate. EH accepts these
+only as a complete set, so "Skip" leaves the map untouched and payroll sets pay
+in EH by hand (records stay `Incomplete`). One value applies to every employee
+(per-employee settings: #75). Re-run it any time; Enter keeps the current
+choice.
 
 `npm test` fails fast on an invalid map.
 

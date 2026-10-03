@@ -186,7 +186,7 @@ finish() {
 
 
 ENV_FILE=".dev.vars"
-TOTAL_STAGES=10
+TOTAL_STAGES=11
 
 # ── extra helpers (below the marker, wizard-specific) ─────────────────────
 
@@ -323,6 +323,11 @@ npm run discover -- --client self
 say ""
 warn "Now open clients/self/field-map.json and check EVERY mapped field ID,"
 warn "resolve any TODO, and confirm the enum maps (gender / state / employmentType)."
+if [[ -f clients/self/field-map.draft.json ]]; then
+  note "Your existing map was kept (it is already set up for this account). The"
+  note "fresh draft is in clients/self/field-map.draft.json; copy across anything"
+  note "the differences above show you need."
+fi
 pause "Press Enter when the field map is tuned."
 v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).businessId||'')")
 if [[ -z "$v" || "$v" == "TODO" ]]; then
@@ -331,6 +336,13 @@ if [[ -z "$v" || "$v" == "TODO" ]]; then
 fi
 write_env EH_BUSINESS_ID "$v"
 set_jsonc EH_BUSINESS_ID "$v"
+
+# ─────────────────────────────────────────────────────────────────────────
+stage "Pay-run settings"
+say "Employment Hero needs a pay schedule, location and pay category for each"
+say "employee, plus where their pay rate comes from. Without them every employee"
+say "lands in EH as Incomplete. Pick each one from your own EH lists below."
+npm run --silent pay-defaults -- --client self
 say "Running the test suite..."
 npm test
 say "Tests pass."
