@@ -11,6 +11,19 @@ const KNOWN = FIELD_SPEC.flatMap((s) => (s.target.kind === "field" ? [{ match: s
 const TAX_DECLARATION = FIELD_SPEC.flatMap((s) => (s.target.kind === "taxDeclaration" ? [{ match: s.match, key: s.target.key }] : []));
 const SUPER = FIELD_SPEC.flatMap((s) => (s.target.kind === "super" ? [{ match: s.match, key: s.target.key }] : []));
 
+/**
+ * Connecteam fields the sync deliberately doesn't map (docs/field-mapping.md),
+ * so discover can say so instead of listing them "for review" (#66).
+ */
+const NOT_SYNCED: Array<{ match: RegExp; reason: string }> = [
+  { match: /^eh pay rate template$/i, reason: "award classification - mapped in the Pay-run settings stage" },
+  ...FIELD_SPEC.filter((s) => s.target.kind === "none").map((s) => ({ match: s.match, reason: "read by the sync, not sent to EH" })),
+  { match: /^pay type$/i, reason: "superseded by each employee's Connecteam pay rate" },
+  { match: /^employee type$/i, reason: "informational only" },
+  { match: /^payment method$/i, reason: "every account is paid electronically" },
+  { match: /^employee id$/i, reason: "the sync uses the Connecteam user id instead" },
+];
+
 export interface DraftInput {
   client: string;
   packId: number;
@@ -39,6 +52,8 @@ export interface DraftResult {
   ruleFedCount: number;
   /** Fields neither mapped nor fed into a rule - left for a human to review. */
   unmapped: Array<{ id: number; label: string }>;
+  /** Fields the sync deliberately doesn't map, with why - not a problem. */
+  notSynced: Array<{ id: number; name: string; reason: string }>;
 }
 
 export function buildFieldMapDraft(input: DraftInput): DraftResult {
@@ -108,7 +123,17 @@ export function buildFieldMapDraft(input: DraftInput): DraftResult {
     draft,
     mappedCount: mapped.length,
     ruleFedCount: ruleConsumed.size,
-    // Truly-unmapped = not in `fields` and not consumed by a rule.
-    unmapped: notInFields.filter((f) => !ruleConsumed.has(f.id)),
+    // Truly-unmapped = not in `fields`, not consumed by a rule, and not a
+    // field the sync deliberately leaves alone.
+    unmapped: notInFields.filter((f) => !ruleConsumed.has(f.id) && !notSyncedReason(fields, f.id)),
+    notSynced: fields.flatMap((f) => {
+      const reason = notSyncedReason(fields, f.customFieldId);
+      return reason && !ruleConsumed.has(f.customFieldId) ? [{ id: f.customFieldId, name: f.name, reason }] : [];
+    }),
   };
+}
+
+function notSyncedReason(fields: CustomFieldDefinition[], id: number): string | undefined {
+  const f = fields.find((x) => x.customFieldId === id);
+  return f ? NOT_SYNCED.find((n) => n.match.test(f.name.trim()))?.reason : undefined;
 }

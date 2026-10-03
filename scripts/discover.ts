@@ -74,6 +74,7 @@ async function ehGet(path: string): Promise<any> {
 async function main(): Promise<void> {
   loadDevVars();
   const client = arg("client");
+  const fromWizard = process.argv.includes("--from-wizard");
   if (!client) throw new Error("usage: npm run discover -- --client <slug>");
   if (!process.env.CT_API_KEY || !process.env.EH_API_KEY) {
     throw new Error("CT_API_KEY and EH_API_KEY must be set (in .dev.vars or the shell)");
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   const paySchedules = businessId ? await ehGet(`/business/${businessId}/payschedule`).catch(() => []) : [];
   const locations = businessId ? await ehGet(`/business/${businessId}/location`).catch(() => []) : [];
 
-  const { draft, mappedCount, ruleFedCount, unmapped } = buildFieldMapDraft({
+  const { draft, mappedCount, ruleFedCount, unmapped, notSynced } = buildFieldMapDraft({
     client,
     packId,
     businessId,
@@ -130,12 +131,38 @@ async function main(): Promise<void> {
     schema = `NOT yet schema-valid - ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`;
   }
 
+  const diff = write.action === "draft" ? diffFieldMaps(existing, draft) : [];
+  const changed = diff.some((l) => l.startsWith("~") || l.startsWith("+"));
+
+  if (fromWizard) {
+    // Inside the wizard (#66): just the field map, in plain words. The wizard
+    // has already collected the IDs and secrets the standalone checklist lists.
+    if (write.action === "draft") {
+      console.log("\nYour field map is already set up for this account, so it was kept.");
+      if (changed) {
+        console.log("Your Connecteam fields have changed since it was set up:");
+        console.log(diff.filter((l) => !l.startsWith("=")).map((l) => "  " + l).join("\n"));
+        console.log(`A fresh draft is in ${outFile}.`);
+      } else {
+        const same = Number(/^= (\d+)/.exec(diff[0] ?? "")?.[1] ?? 0);
+        console.log(`Nothing to change: all ${same} field mappings still match your Connecteam fields.`);
+      }
+    } else {
+      if (write.action === "replace") console.log("\nThe field map that came with the code was for another account, so it was replaced.");
+      console.log(`${write.action === "replace" ? "" : "\n"}Built your field map from your Connecteam fields: ${mappedCount} mapped, ${ruleFedCount} tax/super answers.`);
+    }
+    printFieldLists(unmapped, notSynced);
+    // Machine-readable last line for the wizard.
+    console.log(`MAP_STATUS=${write.action === "draft" ? (changed ? "changed" : "unchanged") : "written"}`);
+    return;
+  }
+
   const line = (k: string, v: string) => `  ${k.padEnd(28)} ${v}`;
   if (write.action === "draft") {
     console.log(`\nKept ${mapFile} - it is already set up for this account (pack ${packId}, business ${businessId}).`);
     console.log(`Wrote DRAFT ${outFile}  (${schema})`);
     console.log("  Your map vs the draft (which Connecteam field feeds each EH field; pay-run settings and rule options aren't compared):");
-    console.log(diffFieldMaps(existing, draft).map((l) => "    " + l).join("\n"));
+    console.log(diff.map((l) => "    " + l).join("\n"));
   } else {
     if (write.action === "replace") {
       console.log(
@@ -145,14 +172,15 @@ async function main(): Promise<void> {
     }
     console.log(`\nWrote DRAFT ${outFile}  (${schema})`);
   }
-  console.log(`  ${mappedCount} fields mapped by name; ${ruleFedCount} fields fed into rules; ${unmapped.length} left for review.`);
-  if (unmapped.length) {
-    console.log("  Connecteam custom fields not in the draft (expected: Direct manager, Pay Type, Employee Type, Payment Method):");
-    console.log(unmapped.map((u) => "    " + u.label).join("\n"));
-  }
+  console.log(`  ${mappedCount} fields mapped by name; ${ruleFedCount} fields fed into rules.`);
+  printFieldLists(unmapped, notSynced);
 
+  // FIELD_MAP_CLIENT and registry.ts only matter when one deployment serves
+  // several clients (a slug other than "self"); a single-client setup leaves
+  // FIELD_MAP_CLIENT blank (docs/RUNBOOK.md).
+  const multiTenant = client !== "self";
   console.log("\nConfiguration checklist (wrangler.jsonc vars + secrets):");
-  console.log(line("FIELD_MAP_CLIENT", client));
+  if (multiTenant) console.log(line("FIELD_MAP_CLIENT", client));
   console.log(line("EH_BUSINESS_ID", businessId || "TODO  (GET /api/v2/business)"));
   console.log(line("CT_ONBOARDING_PACK_ID", String(packId)));
   console.log(line("CT_CUSTOM_PUBLISHER_ID", "TODO  (Connecteam > Settings > Feed settings)"));
@@ -161,7 +189,26 @@ async function main(): Promise<void> {
   console.log(line("CT_API_KEY", "have"));
   console.log(line("EH_API_KEY", "have"));
   console.log(line("CT_WEBHOOK_SECRET", "TODO  (generate a random string; used when registering the webhook)"));
-  console.log("\nNext: register this client in src/mapping/registry.ts, then tune the draft field-map (see docs/RUNBOOK.md step 5).\n");
+  console.log(
+    multiTenant
+      ? "\nNext: register this client in src/mapping/registry.ts, then tune the draft field-map (see docs/RUNBOOK.md step 4).\n"
+      : "\nNext: tune the draft field-map if needed (see docs/RUNBOOK.md step 4).\n",
+  );
+}
+
+/** Fields not in the draft: the ones the sync deliberately skips, then genuinely unknown ones. */
+function printFieldLists(
+  unmapped: Array<{ id: number; label: string }>,
+  notSynced: Array<{ id: number; name: string; reason: string }>,
+): void {
+  if (notSynced.length) {
+    console.log("\nNot used by the sync (that's expected):");
+    console.log(notSynced.map((n) => `  - ${n.name}: ${n.reason}`).join("\n"));
+  }
+  if (unmapped.length) {
+    console.log("\nNot recognised, so not synced (fine unless it holds something Employment Hero needs):");
+    console.log(unmapped.map((u) => "  - " + u.label.replace(/^\d+\s+/, "")).join("\n"));
+  }
 }
 
 main().catch((err) => {

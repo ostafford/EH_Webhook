@@ -113,12 +113,23 @@ describe("buildFieldMapDraft", () => {
     expect(draft.rules.super).toEqual(committed.rules.super);
   });
 
+  it("separates fields the sync deliberately doesn't use from unrecognised ones (#66)", async () => {
+    const { DEMO_CUSTOM_FIELDS } = await import("./fixtures/demo-custom-fields.js");
+    const { unmapped, notSynced } = buildFieldMapDraft({ ...base, fields: DEMO_CUSTOM_FIELDS });
+
+    expect(unmapped.map((u) => u.id)).toEqual([43580607]); // "Test Field" - genuinely unknown
+    expect(notSynced.map((n) => n.name).sort()).toEqual(
+      ["Direct manager", "EH Pay Rate Template", "Employee ID", "Employee Type", "Pay Type", "Payment Method"].sort(),
+    );
+    expect(notSynced.find((n) => n.name === "EH Pay Rate Template")!.reason).toMatch(/Pay-run settings/);
+  });
+
   it("lists unrecognised fields for review", () => {
     const { unmapped } = buildFieldMapDraft({
       ...base,
-      fields: [{ customFieldId: 99, name: "Direct manager", type: "str" }],
+      fields: [{ customFieldId: 99, name: "Favourite colour", type: "str" }],
     });
 
-    expect(unmapped).toEqual([{ id: 99, label: "99  Direct manager (str)" }]);
+    expect(unmapped).toEqual([{ id: 99, label: "99  Favourite colour (str)" }]);
   });
 });
