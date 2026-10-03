@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseFieldMap } from "../src/mapping/schema.js";
@@ -111,25 +111,41 @@ interface EhStub {
   created?: boolean;
 }
 
-type CtFake = SyncDeps["ct"] & { dms: Array<{ userId: number; text: string }>; channels: Array<{ id: string; text: string }> };
+type CtFake = SyncDeps["ct"] & {
+  dms: Array<{ userId: number; text: string }>;
+  channels: Array<{ id: string; text: string }>;
+  /** Recipient (user id or channel id) -> how many more sends to it fail as `retryable`. */
+  failSends: Map<number | string, number>;
+};
 type EhFake = SyncDeps["eh"] & { upserts: Array<{ externalId: string; payload: Record<string, unknown> }> };
 
 function fakeCt(user: ConnecteamUser | null, userOutcome: "ok" | "retryable" | "error" = "ok"): CtFake {
   const dms: Array<{ userId: number; text: string }> = [];
   const channels: Array<{ id: string; text: string }> = [];
+  const failSends = new Map<number | string, number>();
+  // A failed send never reaches `dms`/`channels` - it didn't go out.
+  const failing = (to: number | string): boolean => {
+    const left = failSends.get(to) ?? 0;
+    if (left > 0) failSends.set(to, left - 1);
+    return left > 0;
+  };
+  const down = { outcome: "retryable", status: 429, detail: "rate limited" };
   return {
     dms,
     channels,
+    failSends,
     async getUser() {
       if (userOutcome === "retryable") return { outcome: "retryable", status: 503, detail: "down" };
       if (userOutcome === "error") return { outcome: "error", status: 500, detail: "bad" };
       return { outcome: "ok", data: user };
     },
     async sendDirectMessage(userId: number, text: string) {
+      if (failing(userId)) return down;
       dms.push({ userId, text });
       return { outcome: "ok", data: null };
     },
     async sendChannelMessage(id: string, text: string) {
+      if (failing(id)) return down;
       channels.push({ id, text });
       return { outcome: "ok", data: null };
     },
@@ -579,6 +595,131 @@ describe("runSyncJob - retryable faults", () => {
   });
 });
 
+describe("runSyncJob - a failed Connecteam send is retried, not lost (issue #89)", () => {
+  const invalidTfn = () =>
+    fakeEh({ write: { outcome: "validation", status: 400, issues: [{ field: "taxFileNumber", reason: "invalid" }] } });
+  const withManager = (): ConnecteamUser => {
+    const u = cloneUser();
+    u.customFields.push({ customFieldId: 25145114, type: "directManager", name: "Direct manager", value: 999001 });
+    return u;
+  };
+  const nonResident = (): ConnecteamUser => {
+    const u = cloneUser();
+    u.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
+    u.customFields.find((f) => f.customFieldId === 42923276)!.value = [{ id: 1, value: "No" }];
+    return u;
+  };
+
+  let logged: Array<Record<string, unknown>>;
+  beforeEach(() => {
+    logged = [];
+    vi.spyOn(console, "log").mockImplementation((line: string) => {
+      logged.push(JSON.parse(line) as Record<string, unknown>);
+    });
+    return () => vi.restoreAllMocks();
+  });
+
+  it("a failed Correction DM retries without bumping the cycle, and the next attempt sends it once", async () => {
+    const store = fakeGateway();
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set(17760356, 1);
+    const attempt = () => runSyncJob(job(), deps({ store, eh: invalidTfn(), ct: ct as never }));
+
+    const first = await attempt();
+    expect(first.status).toBe("retry");
+    expect(ct.dms).toHaveLength(0);
+    expect(store.rows.get(17760356)?.failureCycleCount ?? 0).toBe(0);
+    // Nothing terminal saved, so the redelivery is not skipped as "identical".
+    expect(store.rows.get(17760356)?.lastPayloadHash ?? null).toBeNull();
+    expect(store.log).toHaveLength(0);
+    expect(logged).toContainEqual(
+      expect.objectContaining({ evt: "message_send_failed", ctUserId: 17760356, notice: "correction" }),
+    );
+
+    const second = await attempt();
+    expect(second.status).toBe("correction");
+    expect(ct.dms.map((d) => d.userId)).toEqual([17760356]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
+  });
+
+  it("a failed manager escalation retries without re-DMing the employee or re-bumping the cycle", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, failureCycleCount: 2 });
+    const ct = fakeCt(withManager());
+    ct.failSends.set(999001, 1);
+    const attempt = () => runSyncJob(job(), deps({ store, eh: invalidTfn(), ct: ct as never }));
+
+    const first = await attempt();
+    expect(first.status).toBe("retry");
+    expect(ct.dms.map((d) => d.userId)).toEqual([17760356]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(3);
+
+    const second = await attempt();
+    expect(second.status).toBe("correction");
+    expect(second.managerNotified).toBe(true);
+    expect(ct.dms.map((d) => d.userId)).toEqual([17760356, 999001]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(3);
+  });
+
+  it("a redelivery after both DMs went out sends neither again (ADR-0007 row 3)", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, failureCycleCount: 2 });
+    let failNextSave = true;
+    const originalSave = store.saveEmployeeLink.bind(store);
+    store.saveEmployeeLink = async (patch) => {
+      if (failNextSave) {
+        failNextSave = false;
+        throw new Error("D1 write failed");
+      }
+      return originalSave(patch);
+    };
+    const ct = fakeCt(withManager());
+    const attempt = () => runSyncJob(job(), deps({ store, eh: invalidTfn(), ct: ct as never }));
+
+    await expect(attempt()).rejects.toThrow("D1 write failed");
+    const out = await attempt();
+
+    expect(out.status).toBe("correction");
+    expect(out.noticeSuppressed).toBe(true);
+    expect(ct.dms.map((d) => d.userId)).toEqual([17760356, 999001]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(3);
+  });
+
+  it("a failed Manual-follow-up notice retries, and the next attempt posts it once", async () => {
+    const store = fakeGateway();
+    const ct = fakeCt(nonResident());
+    ct.failSends.set("chan-1", 1);
+    const attempt = () => runSyncJob(job(), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect(ct.channels).toHaveLength(0);
+    expect(store.log).toHaveLength(0);
+
+    expect((await attempt()).status).toBe("follow_up");
+    expect(ct.channels).toHaveLength(1);
+  });
+
+  it("a failed Collision alert retries without an audit row, and the next attempt posts it once", async () => {
+    const store = fakeGateway();
+    store.rows.set(99999, {
+      ctUserId: 99999,
+      ehEmployeeId: "555",
+      lastSyncedTs: 1,
+      failureCycleCount: 0,
+      lastPayloadHash: "x",
+    });
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set("chan-1", 1);
+    const attempt = () => runSyncJob(job(), deps({ store, eh: fakeEh({ id: 555 }), ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect(ct.channels).toHaveLength(0);
+    expect(store.log).toHaveLength(0);
+
+    expect((await attempt()).status).toBe("collision");
+    expect(ct.channels).toHaveLength(1);
+    expect(store.log).toHaveLength(1);
+  });
+});
+
 describe("dispatchBatch", () => {
   const mkMsg = (body: SyncJob) => {
     const calls: string[] = [];
@@ -729,6 +870,22 @@ describe("handleDeadLetter", () => {
     await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 + 61 * 60 * 1000 });
 
     expect(ct.channels).toHaveLength(3);
+  });
+
+  it("a failed System alert releases its claim so the next dead-letter posts it (issue #89)", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set("chan-1", 1);
+    const store = fakeGateway();
+    const base = { ct: ct as never, store, adminChannelId: "chan-1" };
+
+    await expect(handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 5 })).resolves.toBeUndefined();
+    expect(ct.channels).toHaveLength(0);
+    expect(store.log.at(-1)).toMatchObject({ outcome: "dead_letter" });
+
+    await handleDeadLetter(job({ ctUserId: 42 }), { ...base, now: () => 60_000 });
+    expect(ct.channels).toHaveLength(1);
+    vi.restoreAllMocks();
   });
 });
 
