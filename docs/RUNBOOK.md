@@ -30,6 +30,15 @@ from `.dev.vars` replaced by `[redacted]`. The screen clears at every stage, so
 this is the way to look back or to send the integrator what happened. It is only
 written when the wizard runs in a real terminal (it uses `script`).
 
+The wizard runs Cloudflare's `wrangler` quietly and shows one line per step
+("✓ Database created", "✓ Deployed: …"). Wrangler's full output goes to
+**`setup-wizard-<date>-<time>-wrangler.log`** beside it, and the last lines of
+any failure are shown on screen. On a fresh install, the database's setup
+steps are applied without asking (wrangler's own confirm defaults to yes when
+run non-interactively, and an empty database has nothing to lose). On a
+re-run with a pending update, the wizard warns that syncing may pause for a
+few seconds and asks first.
+
 ---
 
 ## Prerequisites
