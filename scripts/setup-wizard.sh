@@ -469,24 +469,48 @@ else
 fi
 
 # Show the webhook exactly as Connecteam now has it, so a wrong URL or a
-# disabled toggle is visible here rather than a mystery later.
+# disabled toggle is visible here rather than a mystery later. Connecteam's
+# list (GET /settings/v1/webhooks) marks a turned-off webhook with
+# `isDisabled: true` (#68). The last line is a machine-readable summary.
 say ""
 say "Connecteam's registered webhooks for this account:"
-ct_api "/settings/v1/webhooks" | node -e '
+wh_out=$(ct_api "/settings/v1/webhooks" | node -e '
+  const target = process.argv[1];
   let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    let ours = [];
     try {
-      const d = JSON.parse(s);
-      const list = d.data?.webhooks || d.data || d.webhooks || [];
-      if (!Array.isArray(list) || list.length === 0) {
-        console.log("   (none returned - inspect GET /settings/v1/webhooks by hand)"); return;
-      }
+      const list = JSON.parse(s).data?.webhooks || [];
+      if (list.length === 0) console.log("   (none returned - inspect GET /settings/v1/webhooks by hand)");
       for (const w of list) {
-        const enabled = w.enabled ?? w.isEnabled ?? w.active ?? w.status ?? "?";
-        const events = (w.eventTypes || w.events || []).join(",") || "?";
-        console.log("   ", w.id || w.webhookId || "?", " ", w.url || w.targetUrl || "?", " events:", events, " enabled:", enabled);
+        const mine = w.url === target;
+        if (mine) ours.push(w);
+        const state = w.isDisabled === true ? "DISABLED" : w.isDisabled === false ? "enabled" : "enabled: ?";
+        console.log(`   ${mine ? "->" : "  "} ${w.id}  ${w.url}  events: ${(w.eventTypes || []).join(",") || "?"}  ${state}`);
       }
+      if (ours.length) console.log("   (-> = this Worker)");
     } catch (e) { console.log("   (could not parse the webhook list)"); }
-  })'
+    const status = ours.length === 0 ? "missing" : ours.every(w => w.isDisabled === true) ? "disabled" : "ok";
+    console.log(`STATUS=${status} COUNT=${ours.length} DISABLED_IDS=${ours.filter(w => w.isDisabled === true).map(w => w.id).join(",")}`);
+  })' "$WEBHOOK_TARGET")
+printf '%s\n' "$wh_out" | sed '$d'
+wh_summary=$(printf '%s\n' "$wh_out" | tail -n1)
+wh_status=$(printf '%s' "$wh_summary" | sed -n 's/.*STATUS=\([a-z]*\).*/\1/p')
+wh_count=$(printf '%s' "$wh_summary" | sed -n 's/.*COUNT=\([0-9]*\).*/\1/p')
+wh_disabled=$(printf '%s' "$wh_summary" | sed -n 's/.*DISABLED_IDS=\(.*\)$/\1/p')
+if [[ "$wh_status" == "disabled" ]]; then
+  warn "The webhook for this Worker is turned OFF in Connecteam (id $wh_disabled), so profile"
+  warn "edits won't reach the sync. Turn it on in Connecteam's webhook settings."
+  pause "Press Enter once it's turned on."
+elif [[ -n "$wh_disabled" ]]; then
+  warn "Webhook id(s) $wh_disabled for this Worker are turned off; at least one other is on."
+fi
+if [[ "${wh_count:-0}" -gt 1 ]]; then
+  warn "$wh_count webhooks point at this Worker (from re-running this stage). Each edit is"
+  warn "delivered once per webhook; the sync coalesces them, but delete the extras in Connecteam."
+fi
+if [[ "$wh_status" == "missing" && -n "${WORKER_URL:-}" ]]; then
+  warn "No webhook points at $WEBHOOK_TARGET - profile edits won't sync. See docs/RUNBOOK.md step 6."
+fi
 
 # Close the loop: prove Connecteam is actually delivering to the Worker now,
 # instead of finding out later. /health counts accepted (202) and rejected
@@ -521,7 +545,7 @@ if [[ -n "${WORKER_URL:-}" ]] && confirm "Do a live delivery check now (edit a t
       *)
         warn "no delivery seen in 90s. Usual causes:"
         note "  - the registered URL is not exactly $WEBHOOK_TARGET"
-        note "  - the webhook shows enabled:false above (toggle it on in Connecteam)"
+        note "  - the webhook shows DISABLED above (turn it on in Connecteam's webhook settings)"
         note "  - the edited field isn't mapped, or it was the admin-only side of the pack"
         say  "See raw deliveries with:  npx wrangler tail --format pretty   then edit a profile again."
         SKIPPED+=("Confirm the first webhook delivery (docs/RUNBOOK.md 'Verify')") ;;
