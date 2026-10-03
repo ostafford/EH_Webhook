@@ -9,6 +9,11 @@
  * unit test with fakes or in the Worker with real clients and D1. It never
  * throws for an expected retryable fault - it returns `status: "retry"` and lets
  * the queue handler call `message.retry()`.
+ *
+ * The queue retries a job up to 5 times, re-running it from the start. That is
+ * only safe because every side effect below is idempotent (the EH upsert, the
+ * link) or claimed before it happens (each message). A new side effect must be
+ * one or the other - see docs/adr/0007.
  */
 import type { SyncJob } from "./job.js";
 import type { FieldMap } from "../mapping/schema.js";
