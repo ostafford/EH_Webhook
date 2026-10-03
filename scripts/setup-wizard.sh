@@ -190,6 +190,61 @@ TOTAL_STAGES=13
 
 # ── extra helpers (below the marker, wizard-specific) ─────────────────────
 
+# Readability helpers (#64): every stage reads why -> what you'll do -> the
+# work -> what's next, with blank lines between the blocks.
+
+# why "line" ... : the stage's purpose in plain language.
+why() {
+  printf '\n  %sWhy this step%s\n' "$BOLD" "$RESET"
+  local l; for l in "$@"; do printf '    %s\n' "$l"; done
+}
+
+# todo "action" ... : numbered list of what the person will do in this stage.
+todo() {
+  printf '\n  %sWhat you'"'"'ll do%s\n' "$BOLD" "$RESET"
+  local i=1 l line first
+  for l in "$@"; do
+    first=1
+    # Wrap at 76 columns, continuation lines under the text, not the number.
+    while IFS= read -r line; do
+      if [[ -n "$first" ]]; then printf '    %s%d.%s %s\n' "$BLUE" "$i" "$RESET" "$line"; first=""
+      else printf '       %s\n' "$line"; fi
+    done < <(printf '%s\n' "$l" | fold -s -w 69 | sed 's/ *$//')
+    i=$((i + 1))
+  done
+  printf '\n'
+}
+
+# ok "msg" / fail "msg": a green success line and a red failure line, distinct
+# from warn's yellow.
+ok()   { printf '  %s✓ %s%s\n' "$GREEN" "$1" "$RESET"; }
+fail() { printf '  %s✗ %s%s\n' "$RED" "$1" "$RESET"; }
+
+# next_up "text": how this stage leads into the next one.
+next_up() { printf '\n  %sNext: %s%s\n' "$DIM" "$1" "$RESET"; }
+
+# save KEY VALUE "label" [jsonc]: store a value (and, with "jsonc", the
+# wrangler.jsonc var of the same name) behind one plain line. The file names
+# stay in the end-of-wizard summary for the integrator.
+save() {
+  write_env "$1" "$2" >/dev/null
+  if [[ "${4:-}" == "jsonc" ]]; then set_jsonc "$1" "$2" >/dev/null; fi
+  ok "Saved $3."
+}
+
+# run_tests: the test suite as one line; its full output only if it fails.
+run_tests() {
+  local out n
+  if out=$(env -u FORCE_COLOR NO_COLOR=1 npm test 2>&1); then
+    n=$(printf '%s\n' "$out" | sed -n 's/.*Tests  *\([0-9][0-9]*\) passed.*/\1/p' | tail -1)
+    ok "All ${n:-the} checks passed - the settings fit together."
+  else
+    fail "Some checks failed - the field map or settings need fixing:"
+    printf '%s\n' "$out" | tail -40 | sed 's/^/    /'
+    exit 1
+  fi
+}
+
 # set_jsonc KEY VALUE: replace the first  "KEY": "..."  in wrangler.jsonc.
 # Plain IDs / UUIDs / a workers.dev URL only - no awk-sub metacharacters.
 set_jsonc() {
@@ -264,171 +319,217 @@ banner "EH_Webhook - client deployment"
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Cloudflare account"
-say "This deployment runs on the CLIENT's own Cloudflare account."
-say "If you don't have one yet, sign up on the page that's about to open - it's free."
-say "The sync pipeline uses Cloudflare Queues, which needs the Workers Paid plan (~\$5/mo)."
+why "The sync runs as a small program (a \"Worker\") on Cloudflare, in your own" \
+    "account, so you own it and everything it stores. It needs the Workers Paid" \
+    "plan (about US\$5 a month) because it uses Cloudflare Queues."
+todo "Sign up or sign in on the page that opens, and make sure the account is on Workers Paid." \
+     "Sign this computer in to that account when the next browser tab opens." \
+     "Check that the account name shown here is the right one."
 open_url "https://dash.cloudflare.com/?to=/:account/workers/plans"
-confirm "Do you now have a Cloudflare account on the Workers Paid plan?" || { warn "Create an account and/or upgrade to Workers Paid on the page above, then re-run."; exit 1; }
-say "Logging wrangler in to that account (a browser tab will open)..."
+confirm "Do you now have a Cloudflare account on the Workers Paid plan?" || { fail "Create an account and/or upgrade to Workers Paid on the page above, then run the wizard again."; exit 1; }
+printf '\n'
+say "Signing this computer in to Cloudflare (a browser tab may open)..."
 wr whoami >/dev/null 2>&1 || wr login
 wr whoami | sed 's/^/  /'
-confirm "Is the account above the right one?" || { warn "Run 'npx wrangler logout' then re-run."; exit 1; }
+printf '\n'
+confirm "Is the account above the right one?" || { fail "Run 'npx wrangler logout', then run the wizard again."; exit 1; }
+next_up "Connecteam - the API key the sync uses to read your onboarding packs."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: API key"
-say "Create an API key with read on users + onboarding and write on chat."
+why "The sync uses this key to read approved onboarding packs and to send" \
+    "messages in Connecteam. It is stored only on your Cloudflare account."
+todo "On the page that opens (Connecteam: Integrations > API Keys), create a new API key." \
+     "Give it read access to users and onboarding, and write access to chat and to custom fields (stages 7 and 8 use that)." \
+     "Paste it here. It won't show as you type."
 open_url "https://app.connecteam.com/#/settings/integrations/api"
-step "Navigate to the equivalent of Settings > Integrations > API, create a key."
+printf '\n'
 ask_secret CT_API_KEY "Paste the Connecteam API key:"
-write_env CT_API_KEY "$CT_API_KEY"
+save CT_API_KEY "$CT_API_KEY" "the Connecteam API key"
+next_up "the sender name on the sync's messages."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: custom publisher"
-say "The custom publisher is the sender of every message the sync posts."
+why "Every message the sync sends - to an employee or to your admins - comes" \
+    "from this sender, so it reads as \"EH Sync\" rather than one of your staff."
+todo "In Connecteam, open Settings > Custom Publishers." \
+     "Create one called \"EH Sync\" and copy its number (the publisher ID)." \
+     "Paste it here."
 open_url "https://app.connecteam.com/#/settings"
-step "Navigate to the equivalent of Settings > Feed settings > Custom publishers."
-step "Create one named 'EH Sync' and copy its numeric publisher ID."
+printf '\n'
 ask CT_CUSTOM_PUBLISHER_ID "Paste the custom publisher ID:"
-write_env CT_CUSTOM_PUBLISHER_ID "$CT_CUSTOM_PUBLISHER_ID"
-set_jsonc CT_CUSTOM_PUBLISHER_ID "$CT_CUSTOM_PUBLISHER_ID"
+save CT_CUSTOM_PUBLISHER_ID "$CT_CUSTOM_PUBLISHER_ID" "the sender" jsonc
+next_up "the chat channel for your payroll admins."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: alerts channel"
-say "A chat channel receives Manual-follow-up notices and System alerts."
-say "Create a channel named 'EH Sync Alerts' and add the payroll admins."
+why "When a payroll admin needs to finish something by hand (for example a" \
+    "non-resident tax scale), or something goes wrong, the sync posts a message" \
+    "here. Employees never see this channel; their messages go to them directly."
+todo "In Connecteam, create a chat channel called \"EH Sync Alerts\"." \
+     "Add the payroll admins who should act on its messages." \
+     "Come back here and paste its ID from the list below."
 pause "Press Enter once the channel exists."
+printf '\n'
 say "Chat channels on this account:"
 CHANNEL_LIST=$(ct_api "/chat/v1/conversations" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const c=(JSON.parse(s).data?.conversations)||[];if(!c.length){console.log("   (none found)");return}for(const x of c)console.log("   ",x.id,"  ",x.title||x.name||"(untitled)")}catch(e){console.log("   (could not list - open GET /chat/v1/conversations by hand)")}})')
-printf '%s\n' "$CHANNEL_LIST"
+printf '%s\n\n' "$CHANNEL_LIST"
 if [[ "$CHANNEL_LIST" == *"(none found)"* ]]; then
-  warn "No chat channels found - go create 'EH Sync Alerts', then come back here."
+  warn "No chat channels found - create \"EH Sync Alerts\" first, then come back here."
 fi
-ask ADMIN_CONNECTEAM_CHANNEL_ID "Paste the 'EH Sync Alerts' channel ID:"
-write_env ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
-set_jsonc ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID"
+ask ADMIN_CONNECTEAM_CHANNEL_ID "Paste the \"EH Sync Alerts\" channel ID:"
+save ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID" "the alerts channel" jsonc
+next_up "the onboarding pack your new employees fill in."
 
 # ─────────────────────────────────────────────────────────────────────────
-stage "Connecteam: onboarding pack + webhook secret"
-say "An onboarding pack with an approval step must exist before continuing - the sync watches for a pack's approval to create the employee record in Employment Hero."
-say "Create one (or confirm one already exists) under Settings > Onboarding, with an approval step."
+stage "Connecteam: onboarding pack"
+why "When an admin approves a new employee's onboarding pack, the sync creates" \
+    "that employee in Employment Hero. It needs to know which pack to watch."
+todo "Make sure the pack exists in Connecteam (HR & Skills > Onboarding) and has an approval step." \
+     "Pick it from the list below and paste its number."
 pause "Press Enter once the onboarding pack exists."
+printf '\n'
 say "Onboarding packs on this account:"
 PACK_LIST=$(ct_api "/onboarding/v1/packs" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];if(!p.length){console.log("   (none found)");return}for(const x of p)console.log("   ",x.id||x.packId,"  ",x.name||"(unnamed)")}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})')
-printf '%s\n' "$PACK_LIST"
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=(JSON.parse(s).data?.packs)||(JSON.parse(s).data)||[];if(!p.length){console.log("   (none found)");return}for(const x of p)console.log("    "+String(x.id||x.packId)+"    "+(x.name||"(unnamed)"))}catch(e){console.log("   (could not list - open GET /onboarding/v1/packs by hand)")}})')
+printf '%s\n\n' "$PACK_LIST"
 if [[ "$PACK_LIST" == *"(none found)"* ]]; then
-  warn "No onboarding packs found - go create one with an approval step, then come back here."
+  warn "No onboarding packs found - create one with an approval step, then come back here."
 fi
 ask CT_ONBOARDING_PACK_ID "Paste the onboarding pack ID:"
-write_env CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
-set_jsonc CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
+save CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID" "the onboarding pack" jsonc
 # Keep an existing secret on a re-run: a new one would no longer match the
 # webhook Connecteam already has, and every delivery would get a 401 (#82).
 if CT_WEBHOOK_SECRET=$(_existing CT_WEBHOOK_SECRET) && [[ -n "$CT_WEBHOOK_SECRET" ]]; then
-  say "Kept the existing CT_WEBHOOK_SECRET from $ENV_FILE (used when registering the webhook in the last stage)."
+  ok "Kept the existing webhook secret (the last stage gives it to Connecteam)."
 else
   CT_WEBHOOK_SECRET=$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')
-  write_env CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET"
-  say "Generated CT_WEBHOOK_SECRET (used when registering the webhook in the last stage)."
+  write_env CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET" >/dev/null
+  ok "Created a webhook secret (the last stage gives it to Connecteam)."
 fi
+next_up "Employment Hero - the API key the sync uses to create employees."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Employment Hero: API key"
-say "Create an API key in Employment Hero Payroll."
+why "The sync uses this key to create and update employees in Employment Hero" \
+    "Payroll. Like the Connecteam key, it is stored only on your Cloudflare account."
+todo "On the page that opens, sign in to Employment Hero Payroll and open My Account > Security > API Key." \
+     "Turn OFF the employee self-setup email for the business: the sync fills in each employee's details itself, so the email would only confuse them." \
+     "Paste the key here. It won't show as you type."
 open_url "https://api.yourpayroll.com.au"
-step "Navigate to the equivalent of Payroll settings > API, create a key."
-warn "Also DISABLE the employee self-setup email for the business - the sync fills the record via the API."
+printf '\n'
 ask_secret EH_API_KEY "Paste the Employment Hero API key:"
-write_env EH_API_KEY "$EH_API_KEY"
+save EH_API_KEY "$EH_API_KEY" "the Employment Hero API key"
+next_up "your award, if you pay under one."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Award classifications"
-say "Employment Hero holds your award and its classifications (e.g. \"General Retail"
-say "Casual L3\"). Connecteam has no idea awards exist, so this stage copies them"
-say "into an admin-only Connecteam dropdown. Your admins then pick each employee's"
-say "classification on their Connecteam profile, and EH works out the pay rate."
+why "Employment Hero holds your award and its classifications (for example" \
+    "\"General Retail Casual L3\"). Connecteam doesn't know about awards, so this" \
+    "copies them into an admin-only Connecteam dropdown. Your admins then pick" \
+    "each employee's classification, and Employment Hero works out the pay rate."
+printf '\n'
 if confirm "Does this business pay employees under an award"; then
-  step "In Employment Hero, install the award(s) you pay under, if you haven't yet."
-  note "Choosing an award is a payroll and legal decision, so this stays manual."
+  todo "In Employment Hero, install the award(s) you pay under, if you haven't yet. Choosing an award is a payroll and legal decision, so this part stays manual." \
+       "Press Enter, and the wizard copies the classifications into Connecteam."
   pause "Press Enter once your award is installed in Employment Hero."
-  until npm run --silent provision-classification-field; do
-    warn "The award import didn't finish - the message above says why."
-    confirm "Fix that, then try again" || { warn "Skipped. Re-run later: npm run provision-classification-field"; break; }
+  printf '\n'
+  until npm run --silent provision-classification-field 2>&1 | sed 's/^./  &/'; do
+    printf '\n'
+    fail "The award import didn't finish - the message above says why."
+    confirm "Fix that, then try again" || { warn "Skipped. Run it later with: npm run provision-classification-field"; break; }
   done
-  note "Next for your admins: set each employee's \"EH Pay Rate Template\" on their"
-  note "Connecteam profile. You'll connect it to the sync in the Pay-run settings stage."
+  printf '\n'
+  note "For your admins: set each employee's \"EH Pay Rate Template\" on their Connecteam"
+  note "profile. The Pay-run settings stage connects it to the sync."
 else
   note "Skipped. Each employee's pay rate can come from Connecteam instead (Pay-run settings stage)."
 fi
+next_up "check every Connecteam field the sync reads."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam field check"
-say "The sync reads 27 Connecteam custom fields (TFN, bank, super, tax answers,"
-say "emergency contact...) plus the award dropdown. This checks each one exists,"
-say "is the right type and has the right dropdown options, and says how to fix"
-say "anything that isn't."
+why "The sync reads 27 Connecteam fields (TFN, bank, super, tax answers," \
+    "emergency contact...) plus the award dropdown. This checks each one exists," \
+    "has the right type and dropdown options, and says how to fix anything that doesn't."
+printf '\n'
 field_check() { npm run --silent field-check && fc_rc=0 || fc_rc=$?; [[ $fc_rc -ne 1 ]] || exit 1; }
 field_check
 plan=$(npm run --silent create-fields -- --dry-run) || { printf '%s\n' "$plan" | sed 's/^/  /'; exit 1; }
 if ! printf '%s' "$plan" | grep -q "Nothing to create"; then
-  say ""
+  printf '\n'
   printf '%s\n' "$plan" | sed 's/^/  /'
+  printf '\n'
   if confirm "Create the missing fields in Connecteam now"; then
     until npm run --silent create-fields; do
-      warn "Some fields weren't created - the message above says why."
+      fail "Some fields weren't created - the message above says why."
       confirm "Try again (only the missing ones are created)" || break
     done
-    step "In Connecteam, open your onboarding pack and add every field ticked [ ] above."
-    note "This step has no API, so it has to be done by hand."
-    pause "Press Enter once they're all in the pack, to re-check."
+    todo "In Connecteam, open your onboarding pack and add every field ticked [ ] above. This has no API, so it has to be done by hand."
+    pause "Press Enter once they're all in the pack, to check again."
+    printf '\n'
     field_check
   fi
 fi
 while [[ $fc_rc -eq 2 ]]; do
-  warn "A required field is missing or the wrong type (marked above). The sync can't"
-  warn "create employees in Employment Hero until it's fixed."
-  pause "Fix it in Connecteam, then press Enter to re-check (Ctrl-C to stop)."
+  printf '\n'
+  fail "A required field is missing or the wrong type (marked above). The sync can't"
+  fail "create employees in Employment Hero until it's fixed."
+  pause "Fix it in Connecteam, then press Enter to check again (Ctrl-C to stop)."
+  printf '\n'
   field_check
 done
-note "Can't be checked automatically: that every field is in the onboarding pack."
+printf '\n'
+note "One thing this can't check: that every field is in your onboarding pack."
 note "A field that isn't in the pack is never asked, so it is always blank."
 pause "Press Enter when you've confirmed the pack includes them."
+next_up "match your Connecteam fields to Employment Hero's."
 
 # ─────────────────────────────────────────────────────────────────────────
-stage "Discover the field map + structural IDs"
-say "Reading the client's Connecteam fields and Employment Hero IDs..."
-npm run discover -- --client self
-say ""
-warn "Now open clients/self/field-map.json and check EVERY mapped field ID,"
-warn "resolve any TODO, and confirm the enum maps (gender / state / employmentType)."
-if [[ -f clients/self/field-map.draft.json ]]; then
-  note "Your existing map was kept (it is already set up for this account). The"
-  note "fresh draft is in clients/self/field-map.draft.json; copy across anything"
-  note "the differences above show you need."
+stage "Field map"
+why "The field map tells the sync which Connecteam field fills which Employment" \
+    "Hero field (for example \"TFN\" fills the tax file number). It is built from" \
+    "your fields, so you don't have to write it."
+printf '\n'
+discover_out=$(npm run --silent discover -- --client self --from-wizard) || { printf '%s\n' "$discover_out" | sed 's/^/  /'; exit 1; }
+printf '%s\n' "$discover_out" | sed '$d' | sed 's/^./  &/'
+map_status=$(printf '%s\n' "$discover_out" | tail -n1 | sed -n 's/^MAP_STATUS=//p')
+printf '\n'
+if [[ "$map_status" == "changed" ]]; then
+  warn "Your field map was kept, but your Connecteam fields changed since it was set up."
+  todo "Copy the changes you want from clients/self/field-map.draft.json into clients/self/field-map.json (or ask your integrator)."
+  pause "Press Enter when that's done."
+else
+  ok "Field map ready."
 fi
-pause "Press Enter when the field map is tuned."
 v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).businessId||'')")
 if [[ -z "$v" || "$v" == "TODO" ]]; then
-  ask EH_BUSINESS_ID "Enter EH_BUSINESS_ID:"
+  ask EH_BUSINESS_ID "Enter the Employment Hero business ID:"
   v="$EH_BUSINESS_ID"
 fi
-write_env EH_BUSINESS_ID "$v"
-set_jsonc EH_BUSINESS_ID "$v"
+save EH_BUSINESS_ID "$v" "the Employment Hero business" jsonc
+next_up "pay-run settings."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Pay-run settings"
-say "Employment Hero needs a pay schedule, location and pay category for each"
-say "employee, plus where their pay rate comes from. Without them every employee"
-say "lands in EH as Incomplete. Pick each one from your own EH lists below."
+why "Employment Hero needs a pay schedule, location and pay category for each" \
+    "employee, plus where their pay rate comes from. Without them, every employee" \
+    "lands in Employment Hero as Incomplete. You pick each one from your own lists."
+printf '\n'
 npm run --silent pay-defaults -- --client self
-say "Running the test suite..."
-npm test
-say "Tests pass."
+printf '\n'
+say "Checking that the field map and settings fit together..."
+run_tests
+next_up "set up the sync's storage on Cloudflare."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Provision Cloudflare resources"
-confirm "Create a D1 database and two Queues on this Cloudflare account now?" || { warn "Aborted."; exit 1; }
+why "The sync keeps a small notebook (a database) of which Connecteam person is" \
+    "which Employment Hero employee - no TFNs or bank details - and two queues:" \
+    "an in-tray for work, and a problem tray so nothing is silently lost."
+printf '\n'
+confirm "Create the database and the two queues on this Cloudflare account now?" || { warn "Stopped here. Nothing was created on Cloudflare."; exit 1; }
 db_out=$(wr d1 create eh-webhook 2>&1 || true)
 printf '%s\n' "$db_out" | sed 's/^/  /'
 db_id=$(printf '%s' "$db_out" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
@@ -440,9 +541,13 @@ say "Applying migrations to the remote database..."
 wr d1 migrations apply eh-webhook --remote
 wr queues create eh-webhook-sync 2>&1 | sed 's/^/  /' || true
 wr queues create eh-webhook-dlq  2>&1 | sed 's/^/  /' || true
+next_up "put the sync live."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Push secrets + deploy"
+why "This puts the sync live on your Cloudflare account and stores the two API" \
+    "keys and the webhook secret there, where only the sync can read them."
+printf '\n'
 put_secret CT_API_KEY "$CT_API_KEY"
 put_secret EH_API_KEY "$EH_API_KEY"
 put_secret CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET"
@@ -457,17 +562,18 @@ if [[ -n "$WORKER_URL" ]]; then
 else
   warn "Could not read the deployed URL from wrangler output - check the dashboard."
 fi
+next_up "connect Connecteam's profile updates to the sync."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Register the Connecteam webhook"
-say "Registers the user_updated webhook so profile edits sync after go-live."
+why "So that an employee's later profile edits reach Employment Hero within" \
+    "seconds, Connecteam tells the sync whenever a profile changes (a \"webhook\")." \
+    "Only the API can give it the secret the sync checks, so the wizard does this."
 WEBHOOK_TARGET="${WORKER_URL:-https://<your-worker>.workers.dev}/webhook"
+printf '\n'
 note "URL:    $WEBHOOK_TARGET"
 note "Event:  users / user_updated"
-say ""
-say "The signing secret (secretKey) can ONLY be set via the API - the Connecteam"
-say "UI has no field for it, and the Worker rejects every unsigned delivery with"
-say "401. So the wizard registers it here rather than sending you to the UI."
+printf '\n'
 if [[ -n "${WORKER_URL:-}" ]]; then
   wh_body=$(printf '{"name":"EH Payroll Sync (profile updates)","url":"%s","featureType":"users","eventTypes":["user_updated"],"secretKey":"%s","isDisabled":false}' "$WEBHOOK_TARGET" "$CT_WEBHOOK_SECRET")
   # Re-running must not add a second webhook (#82): update one already pointing
@@ -603,9 +709,6 @@ if [[ -n "${WORKER_URL:-}" ]] && confirm "Do a live delivery check now (edit a t
     esac
   fi
 fi
-say ""
-say "The signature scheme (header x-webhook-secret, no HMAC) was confirmed in"
-say "src/connecteam/signature.ts during #22."
 
 # The approval sweep is a Cron Trigger, and Cloudflare can take up to 15
 # minutes to start a new one after the first deploy (#69). Until it has run

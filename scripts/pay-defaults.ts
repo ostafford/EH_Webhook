@@ -159,9 +159,11 @@ async function main(): Promise<void> {
     return;
   }
   parseFieldMap(updated); // never write a map the Worker would reject
-  writeFileSync(mapFile, JSON.stringify(updated, null, 2) + "\n");
+  // Same choices as before: leave the file (and its formatting) alone.
+  const unchanged = JSON.stringify(updated) === JSON.stringify(map);
+  if (!unchanged) writeFileSync(mapFile, JSON.stringify(updated, null, 2) + "\n");
 
-  console.log(`\nSaved to ${mapFile}:`);
+  console.log(unchanged ? `\nNo change - ${mapFile} already has these settings:` : `\nSaved to ${mapFile}:`);
   console.log(`  Pay schedule       ${paySchedule.name}`);
   console.log(`  Primary location   ${location.name}`);
   console.log(`  Pay category       ${category.name}`);
