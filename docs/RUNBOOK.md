@@ -331,7 +331,7 @@ A `200` with `data.id` means it is registered. List them any time with
 
 | Path | Test | Expected |
 |---|---|---|
-| Approval | Approve a test employee's Onboarding pack | They appear in Employment Hero within ~1 min (the sweep runs every minute) |
+| Approval | Approve a test employee's Onboarding pack | They appear in Employment Hero within ~1 min (the sweep runs every minute). **On a first deploy, allow up to 15 min**: Cloudflare can take that long to start a new Cron Trigger. Until `ops.lastSweepOkAt` on `/health` shows a time, the sweep hasn't run yet; the wizard offers to wait for it |
 | Edit | Change that employee's Connecteam profile | Their EH record updates (via the `user_updated` webhook — step 6) |
 | Correction | Enter a deliberately bad BSB | The employee gets a **Correction message** from the custom publisher |
 | Follow-up | Set a test employee to non-resident | A **Manual-follow-up notice** appears in the **alerts channel**; the Sync still completes |
