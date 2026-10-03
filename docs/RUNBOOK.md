@@ -85,7 +85,9 @@ wizard captures the IDs. The integrator usually drives this part of the call.
 
 ### 2a. API key
 Settings → API. Create a key with **read** on users + onboarding and **write** on
-chat. → **`CT_API_KEY`** (Cloudflare secret).
+chat. During setup it also needs **write on custom fields**: the wizard creates
+the missing fields (2f) and the award dropdown (§3). → **`CT_API_KEY`**
+(Cloudflare secret).
 
 ### 2b. Custom publisher — *the sender of every message*
 Settings → Feed settings → create a custom publisher named e.g. **"EH Sync"**.
@@ -128,6 +130,22 @@ The pack employees complete. The wizard lists packs via `GET /onboarding/v1/pack
 The wizard generates a random 32-byte hex string. The same value is given to
 Connecteam when the webhook is registered (step 5). → **`CT_WEBHOOK_SECRET`**
 (Cloudflare secret).
+
+### 2f. Custom fields
+The sync reads 27 custom fields (`docs/connecteam-field-checklist.md`; the award
+dropdown is §3). The wizard creates any that are missing, with the right type,
+dropdown options and permissions:
+
+```bash
+npm run create-fields -- --dry-run   # list what's missing
+npm run create-fields
+```
+
+A field the client already has under their own name (e.g. "Tax File Number"
+for "TFN") is matched and left alone, so re-running never duplicates one.
+**Then attach each new field to the onboarding pack in the Connecteam UI** (no
+API for that); the script prints the exact list. A field not in the pack is
+never asked, so it is always blank.
 
 ---
 
