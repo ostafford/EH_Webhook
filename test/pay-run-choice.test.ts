@@ -58,13 +58,18 @@ const picks = {
 };
 
 describe("rateSourceOptions", () => {
-  it("offers the award only once the award field is mapped", () => {
+  it("offers the award only once the award field exists - mapped, or found in Connecteam", () => {
     expect(rateSourceOptions(baseMap()).map((o) => o.key)).toEqual(["connecteamPayRate", "skip"]);
     expect(rateSourceOptions(baseMap({ fields: [awardField] })).map((o) => o.key)).toEqual([
       "award",
       "connecteamPayRate",
       "skip",
     ]);
+    expect(rateSourceOptions(baseMap(), 555).map((o) => o.key)).toEqual(["award", "connecteamPayRate", "skip"]);
+  });
+
+  it("names the Connecteam field over a stale mapped one", () => {
+    expect(rateSourceOptions(baseMap({ fields: [awardField] }), 555)[0]!.label).toMatch(/field 555/);
   });
 });
 
@@ -100,6 +105,20 @@ describe("applyPayRunChoice", () => {
     expect(out.employmentHero.perEmployeeRate).toEqual({ source: "connecteamPayRate" });
     expect(out.employmentHero.payRateTemplate).toBeUndefined();
     expect(() => parseFieldMap(out)).not.toThrow();
+  });
+
+  it("award: maps the award field the wizard just created (no JSON editing)", () => {
+    const out: any = applyPayRunChoice(baseMap(), { ...picks, rateSource: "award", awardFieldId: 555 });
+
+    expect(out.fields).toContainEqual({ eh: "payRateTemplate", from: { customFieldId: 555 }, transform: "dropdownValue" });
+    expect(out.employmentHero.payRateTemplate).toEqual({ source: "connecteamField" });
+    expect(() => parseFieldMap(out)).not.toThrow();
+  });
+
+  it("Connecteam pay rate: removes the award rule so EH gets one rate source", () => {
+    const out: any = applyPayRunChoice(baseMap({ fields: [awardField] }), { ...picks, rateSource: "connecteamPayRate" });
+
+    expect(out.fields.some((f: any) => f.eh === "payRateTemplate")).toBe(false);
   });
 
   it("skip: leaves the map exactly as it was", () => {

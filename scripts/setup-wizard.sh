@@ -186,7 +186,7 @@ finish() {
 
 
 ENV_FILE=".dev.vars"
-TOTAL_STAGES=11
+TOTAL_STAGES=12
 
 # ── extra helpers (below the marker, wizard-specific) ─────────────────────
 
@@ -315,6 +315,26 @@ step "Navigate to the equivalent of Payroll settings > API, create a key."
 warn "Also DISABLE the employee self-setup email for the business - the sync fills the record via the API."
 ask_secret EH_API_KEY "Paste the Employment Hero API key:"
 write_env EH_API_KEY "$EH_API_KEY"
+
+# ─────────────────────────────────────────────────────────────────────────
+stage "Award classifications"
+say "Employment Hero holds your award and its classifications (e.g. \"General Retail"
+say "Casual L3\"). Connecteam has no idea awards exist, so this stage copies them"
+say "into an admin-only Connecteam dropdown. Your admins then pick each employee's"
+say "classification on their Connecteam profile, and EH works out the pay rate."
+if confirm "Does this business pay employees under an award"; then
+  step "In Employment Hero, install the award(s) you pay under, if you haven't yet."
+  note "Choosing an award is a payroll and legal decision, so this stays manual."
+  pause "Press Enter once your award is installed in Employment Hero."
+  until npm run --silent provision-classification-field; do
+    warn "The award import didn't finish - the message above says why."
+    confirm "Fix that, then try again" || { warn "Skipped. Re-run later: npm run provision-classification-field"; break; }
+  done
+  note "Next for your admins: set each employee's \"EH Pay Rate Template\" on their"
+  note "Connecteam profile. You'll connect it to the sync in the Pay-run settings stage."
+else
+  note "Skipped. Each employee's pay rate can come from Connecteam instead (Pay-run settings stage)."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Discover the field map + structural IDs"
