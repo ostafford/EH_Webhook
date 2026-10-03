@@ -8,8 +8,10 @@ import {
   runSyncJob,
   dispatchBatch,
   handleDeadLetter,
+  retryDelaySeconds,
   type SyncDeps,
 } from "../src/sync/consumer.js";
+import { CORRECTION_NOTICE_DEDUPE_MS } from "../src/sync/notices.js";
 import type { SyncJob } from "../src/sync/job.js";
 import type { EmployeeLink, EmployeeLinkPatch, SyncGateway, SyncLogEntry } from "../src/sync/gateway.js";
 import type { CtResult, PayRate } from "../src/connecteam/types.js";
@@ -721,15 +723,42 @@ describe("runSyncJob - a failed Connecteam send is retried, not lost (issue #89)
 });
 
 describe("dispatchBatch", () => {
-  const mkMsg = (body: SyncJob) => {
+  const mkMsg = (body: SyncJob, attempts = 1) => {
     const calls: string[] = [];
+    const retryDelays: Array<number | undefined> = [];
     return {
       body,
+      attempts,
       ack: () => calls.push("ack"),
-      retry: () => calls.push("retry"),
+      retry: (options?: { delaySeconds?: number }) => {
+        calls.push("retry");
+        retryDelays.push(options?.delaySeconds);
+      },
       calls,
+      retryDelays,
     };
   };
+
+  it("delays a retry by the backoff for its attempt number (issue #90)", async () => {
+    const msg = mkMsg(job({ ctUserId: 2 }), 3);
+    await dispatchBatch(
+      { queue: "eh-webhook-sync", messages: [msg] },
+      deps({ ct: fakeCt(null, "retryable") as never }),
+      "eh-webhook-dlq",
+    );
+    expect(msg.calls).toEqual(["retry"]);
+    expect(msg.retryDelays).toEqual([retryDelaySeconds(3)]);
+  });
+
+  it("delays the retry of a job that threw, too", async () => {
+    const store = fakeGateway();
+    store.getEmployeeLink = async () => {
+      throw new Error("D1 unavailable");
+    };
+    const msg = mkMsg(job(), 1);
+    await dispatchBatch({ queue: "eh-webhook-sync", messages: [msg] }, deps({ store }), "eh-webhook-dlq");
+    expect(msg.retryDelays).toEqual([retryDelaySeconds(1)]);
+  });
 
   it("acks a synced message and retries a retryable one", async () => {
     const good = mkMsg(job({ ctUserId: 1 }));
@@ -997,5 +1026,34 @@ describe("runSyncJob - per-employee pay rate (issue #42)", () => {
       deps({ ct, eh: fakeEh({ id: 1, created: true }), store: fakeGateway() }),
     );
     expect(ct.calls).toHaveLength(0);
+  });
+});
+
+describe("retry backoff (issue #90)", () => {
+  // The consumer's max_retries, read from wrangler.jsonc so raising it can't
+  // silently stretch the retry window past the notice claims.
+  const maxRetries = (() => {
+    const cfg = readFileSync(fileURLToPath(new URL("../wrangler.jsonc", import.meta.url)), "utf8");
+    const m = /"queue":\s*"eh-webhook-sync",[^}]*?"max_retries":\s*(\d+)/.exec(cfg);
+    if (!m) throw new Error("max_retries for eh-webhook-sync not found in wrangler.jsonc");
+    return Number(m[1]);
+  })();
+  // Delivery n (attempts = n) failing waits retryDelaySeconds(n) before n+1.
+  // The last delivery (attempts = maxRetries + 1) dead-letters instead.
+  const windowSeconds = Array.from({ length: maxRetries }, (_, i) => retryDelaySeconds(i + 1)).reduce(
+    (a, b) => a + b,
+    0,
+  );
+
+  it("doubles from 30 s and caps at 8 min", () => {
+    expect([1, 2, 3, 4, 5, 6, 10].map(retryDelaySeconds)).toEqual([30, 60, 120, 240, 480, 480, 480]);
+  });
+
+  it("spans a 5-minute Employment Hero outage before dead-lettering", () => {
+    expect(windowSeconds).toBeGreaterThan(5 * 60);
+  });
+
+  it("finishes well inside the 1 h Correction claim, so a late retry can't re-send a message", () => {
+    expect(windowSeconds * 1000).toBeLessThan(CORRECTION_NOTICE_DEDUPE_MS / 2);
   });
 });
