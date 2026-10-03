@@ -178,6 +178,21 @@ It writes field **names** and IDs only — never an employee value.
 - Confirm the enum `map`s match the client's dropdown option text — `gender`,
   `residentialState` (incl. `INTERNATIONAL`), `employmentType`.
 
+**Then pick the pay-run settings** (the wizard's next stage):
+
+```bash
+npm run pay-defaults -- --client self
+```
+
+Lists the client's Employment Hero pay schedules, locations and primary pay
+categories and writes the chosen **names** into `employmentHero.defaults`, plus
+where each employee's pay rate comes from: the award classification (offered
+once the award field is mapped) or their Connecteam pay rate. EH accepts these
+only as a complete set, so "Skip" leaves the map untouched and payroll sets pay
+in EH by hand (records stay `Incomplete`). One value applies to every employee
+(per-employee settings: #75). Re-run it any time; Enter keeps the current
+choice.
+
 `npm test` fails fast on an invalid map.
 
 ---
