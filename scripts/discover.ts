@@ -8,8 +8,11 @@
  *   - stdout                          — a configuration checklist (every var and
  *                                        secret, with the discovered value or a TODO)
  *
- * It never writes employee values anywhere - it reads custom-field NAMES and
- * types, and the account's structural ids.
+ * It never reads or writes employee values - it reads the account's
+ * custom-field DEFINITIONS (`GET /users/v1/custom-fields`: id, name, type) and
+ * structural ids. Definitions exist as soon as a field is created, so it works
+ * on a fresh onboarding pack nobody has answered yet. They cover the whole
+ * account; whether a field is attached to the pack can't be read via the API.
  *
  * Env (from .dev.vars or the shell): CT_API_KEY, EH_API_KEY.
  * Optional: EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID (skip the pickers).
@@ -18,6 +21,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseFieldMap } from "../src/mapping/schema.js";
+import { listCustomFieldDefinitions } from "./lib/connecteam-custom-fields.js";
+import { buildFieldMapDraft } from "./lib/discover-draft.js";
 
 // --- env -----------------------------------------------------------------
 
@@ -60,55 +65,6 @@ async function ehGet(path: string): Promise<any> {
   return r.json();
 }
 
-// --- known Connecteam-name -> EH-field rules (from docs/field-mapping.md) ---
-
-interface Known {
-  match: RegExp;
-  eh: string;
-  transform: string;
-  required?: boolean;
-  sensitive?: boolean;
-  map?: Record<string, string>;
-}
-
-const KNOWN: Known[] = [
-  { match: /legal first name/i, eh: "firstName", transform: "trimString", required: true },
-  { match: /legal surname/i, eh: "surname", transform: "trimString", required: true },
-  { match: /birthday|date of birth/i, eh: "dateOfBirth", transform: "dateDmyToIso", required: true },
-  { match: /^gender/i, eh: "gender", transform: "dropdownValue", map: { Male: "Male", Female: "Female", Other: "Indeterminate" } },
-  { match: /street address/i, eh: "residentialStreetAddress", transform: "locationStreetLine" },
-  { match: /suburb/i, eh: "residentialSuburb", transform: "trimString" },
-  { match: /^state/i, eh: "residentialState", transform: "dropdownValue" },
-  { match: /postcode|post code/i, eh: "residentialPostCode", transform: "zeroPad4" },
-  { match: /country/i, eh: "residentialCountry", transform: "locationFull", map: { Australia: "AU" } },
-  { match: /emergency contact name/i, eh: "emergencyContact1_Name", transform: "trimString" },
-  { match: /emergency contact (number|phone)/i, eh: "emergencyContact1_ContactNumber", transform: "trimString" },
-  { match: /emergency contact relationship/i, eh: "emergencyContact1_Relationship", transform: "trimString" },
-  { match: /employment start date|start date/i, eh: "startDate", transform: "dateDmyToIso", required: true },
-  { match: /^title/i, eh: "jobTitle", transform: "trimString" },
-  { match: /employee status/i, eh: "employmentType", transform: "dropdownValue", map: { FullTime: "FullTime", PartTime: "PartTime", Casual: "Casual", LabourHire: "LabourHire" } },
-  { match: /^tfn|tax file number/i, eh: "taxFileNumber", transform: "digits", required: true, sensitive: true },
-  { match: /name on bank account/i, eh: "bankAccount1_AccountName", transform: "trimString", sensitive: true },
-  { match: /^bsb/i, eh: "bankAccount1_BSB", transform: "zeroPad6", sensitive: true },
-  { match: /account number/i, eh: "bankAccount1_AccountNumber", transform: "digits", sensitive: true },
-  // Optional, per issue #42 - only used when the client also sets
-  // employmentHero.perEmployeeRate. Harmless if the field doesn't exist.
-  { match: /standard hours.*week|hours per week|weekly hours/i, eh: "hoursPerWeek", transform: "number" },
-];
-
-const TAX_DECLARATION: Array<{ match: RegExp; key: string }> = [
-  { match: /tax-?free threshold/i, key: "claimTaxFreeThreshold" },
-  { match: /australian resident/i, key: "australianResident" },
-  { match: /help.*debt|stsl|study.*debt/i, key: "hasHelpOrStslDebt" },
-];
-
-const SUPER: Array<{ match: RegExp; key: string }> = [
-  { match: /super.*usi|usi/i, key: "usiField" },
-  { match: /super.*abn/i, key: "abnField" },
-  { match: /super fund name/i, key: "fundNameField" },
-  { match: /member number/i, key: "memberNumberField" },
-];
-
 // --- main --------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -119,33 +75,16 @@ async function main(): Promise<void> {
     throw new Error("CT_API_KEY and EH_API_KEY must be set (in .dev.vars or the shell)");
   }
 
-  // Connecteam: pack + one user's custom-field metadata
+  // Connecteam: the pack, and every custom-field definition in the account.
+  // Definitions exist as soon as a field is created, so this works on a fresh
+  // pack nobody has filled in yet.
   let packId = Number(process.env.CT_ONBOARDING_PACK_ID) || undefined;
   const packs = await ctGet("/onboarding/v1/packs").then((b) => b?.data?.packs ?? b?.data ?? []);
   if (!packId && packs.length) packId = packs[0].id ?? packs[0].packId;
   if (!packId) throw new Error("no onboarding pack found - set CT_ONBOARDING_PACK_ID");
 
-  const assignments = await ctGet(`/onboarding/v1/packs/${packId}/assignments`).then((b) => b?.data?.assignments ?? []);
-  if (!assignments.length) throw new Error(`pack ${packId} has no assignments to sample custom fields from`);
-
-  // Some assignments point at users that no longer exist or have no custom
-  // fields populated - scan until we find one with a real field set.
-  let fields: Array<{ customFieldId: number; name: string; type: string }> = [];
-  for (const a of assignments.slice(0, 15)) {
-    const user = await ctGet(`/users/v1/users?userIds=${a.userId}&limit=1&offset=0`).then(
-      (b) => (b?.data?.users ?? []).find((u: any) => u.userId === a.userId),
-    );
-    const cf = user?.customFields ?? [];
-    if (cf.length > fields.length) {
-      fields = cf.map((f: any) => ({
-        customFieldId: f.customFieldId,
-        name: String(f.name ?? ""),
-        type: String(f.type ?? ""),
-      }));
-    }
-    if (fields.length >= 15) break;
-  }
-  if (!fields.length) throw new Error(`no user in pack ${packId} had readable custom fields`);
+  const fields = await listCustomFieldDefinitions(ctGet);
+  if (!fields.length) throw new Error("the Connecteam account has no custom fields - create them first (docs/connecteam-field-checklist.md)");
 
   // Employment Hero: structural ids
   const businesses = await ehGet("/business").then((b) => (Array.isArray(b) ? b : b?.businesses ?? []));
@@ -153,60 +92,14 @@ async function main(): Promise<void> {
   const paySchedules = businessId ? await ehGet(`/business/${businessId}/payschedule`).catch(() => []) : [];
   const locations = businessId ? await ehGet(`/business/${businessId}/location`).catch(() => []) : [];
 
-  // Build the field-map draft
-  const rules: any[] = [];
-  const notInFields: Array<{ id: number; label: string }> = [];
-  for (const f of fields) {
-    const k = KNOWN.find((x) => x.match.test(f.name));
-    if (!k) {
-      notInFields.push({ id: f.customFieldId, label: `${f.customFieldId}  ${f.name} (${f.type})` });
-      continue;
-    }
-    const rule: any = { eh: k.eh, from: { customFieldId: f.customFieldId }, transform: k.transform };
-    if (k.required) rule.required = true;
-    if (k.sensitive) rule.sensitive = true;
-    if (k.map) rule.map = k.map;
-    rules.push(rule);
-  }
-
-  const ruleConsumed = new Set<number>();
-  const pick = (list: typeof TAX_DECLARATION) =>
-    Object.fromEntries(
-      list
-        .map(({ match, key }) => {
-          const f = fields.find((x) => match.test(x.name));
-          if (f) ruleConsumed.add(f.customFieldId);
-          return f ? [key, { customFieldId: f.customFieldId }] : null;
-        })
-        .filter(Boolean) as [string, unknown][],
-    );
-
-  const superPick = SUPER.map(({ match, key }) => {
-    const f = fields.find((x) => match.test(x.name));
-    if (f) ruleConsumed.add(f.customFieldId);
-    return f ? [key, f.customFieldId] : [key, "TODO"];
-  });
-
-  const draft = {
+  const { draft, mappedCount, ruleFedCount, unmapped } = buildFieldMapDraft({
     client,
-    connecteam: { onboardingPackId: packId },
-    employmentHero: {
-      businessId: businessId || "TODO",
-      payScheduleId: String(paySchedules[0]?.id ?? "TODO"),
-      locationId: String(locations[0]?.id ?? "TODO"),
-    },
-    identity: { externalIdFrom: "userId", emailFallbackFrom: "email" },
-    fields: [
-      { eh: "emailAddress", from: { userField: "email" }, transform: "lowerTrim" },
-      { eh: "mobilePhone", from: { userField: "phoneNumber" }, transform: "phoneAu" },
-      ...rules,
-    ],
-    rules: {
-      taxDeclaration: pick(TAX_DECLARATION),
-      super: Object.fromEntries(superPick),
-      constants: { bankAccount1_AllocatedPercentage: 100, bankAccount1: "Electronic" },
-    },
-  };
+    packId,
+    businessId,
+    payScheduleId: String(paySchedules[0]?.id ?? ""),
+    locationId: String(locations[0]?.id ?? ""),
+    fields,
+  });
 
   const outDir = arg("out") ?? join(dirname(fileURLToPath(import.meta.url)), "..", "clients", client);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
@@ -220,12 +113,9 @@ async function main(): Promise<void> {
     schema = `NOT yet schema-valid - ${err instanceof Error ? err.message.split("\n")[0] : String(err)}`;
   }
 
-  // Truly-unmapped = not in `fields` and not consumed by a rule.
-  const unmapped = notInFields.filter((f) => !ruleConsumed.has(f.id));
-
   const line = (k: string, v: string) => `  ${k.padEnd(28)} ${v}`;
   console.log(`\nWrote DRAFT ${outFile}  (${schema})`);
-  console.log(`  ${rules.length} fields mapped by name; ${ruleConsumed.size} fields fed into rules; ${unmapped.length} left for review.`);
+  console.log(`  ${mappedCount} fields mapped by name; ${ruleFedCount} fields fed into rules; ${unmapped.length} left for review.`);
   if (unmapped.length) {
     console.log("  Connecteam custom fields not in the draft (expected: Direct manager, Pay Type, Employee Type, Payment Method):");
     console.log(unmapped.map((u) => "    " + u.label).join("\n"));

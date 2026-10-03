@@ -33,6 +33,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { listRawCustomFields } from "./lib/connecteam-custom-fields.js";
 
 // --- env -----------------------------------------------------------------
 
@@ -93,24 +94,6 @@ async function ehGet(path: string): Promise<any> {
   return r.json();
 }
 
-/**
- * `GET /users/v1/custom-fields` is paginated (default page size 10, no
- * single-field-by-id endpoint exists) - page through it so `--field-id` mode
- * can find a field regardless of how many others exist before it.
- */
-async function ctAllCustomFields(): Promise<any[]> {
-  const PAGE = 50;
-  let offset = 0;
-  const all: any[] = [];
-  for (;;) {
-    const page = (await ctGet(`/users/v1/custom-fields?limit=${PAGE}&offset=${offset}`)).data.customFields;
-    all.push(...page);
-    if (page.length < PAGE) break;
-    offset += PAGE;
-  }
-  return all;
-}
-
 // --- main --------------------------------------------------------------
 
 const DEFAULT_FIELD_NAME = "EH Pay Rate Template";
@@ -137,7 +120,7 @@ async function main(): Promise<void> {
 
   if (fieldId) {
     // --- re-run mode: extend an existing field ---
-    const existing = (await ctAllCustomFields()).find((f: any) => String(f.id) === String(fieldId));
+    const existing = (await listRawCustomFields(ctGet)).find((f: any) => String(f.id) === String(fieldId));
     if (!existing) throw new Error(`no Connecteam custom field with id ${fieldId}`);
     if (existing.type !== "dropdown") throw new Error(`field ${fieldId} ("${existing.name}") is type "${existing.type}", not "dropdown"`);
 
