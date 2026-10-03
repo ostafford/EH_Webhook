@@ -155,8 +155,11 @@ The wizard runs this; here is what it does.
 npm run discover -- --client self
 ```
 
-Reads the client's Connecteam custom-field **names** and the Employment Hero
-structural IDs, then writes:
+Reads every custom-field **definition** (name, type, ID) in the client's
+Connecteam account and the Employment Hero structural IDs, then writes the
+files below. It works on a fresh onboarding pack that nobody has filled in yet. Definitions
+cover the whole account, and the API can't tell which fields are attached to
+the pack, so confirm that in the Connecteam UI.
 
 - **`clients/self/field-map.json`** — a schema-checked draft mapping (overwrites
   the placeholder that ships in the repo).
