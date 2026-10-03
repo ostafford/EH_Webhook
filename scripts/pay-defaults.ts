@@ -9,8 +9,9 @@
  *
  * Company-wide only - one value for every employee (see #75 for per-employee).
  *
- * Env (from .dev.vars or the shell): EH_API_KEY. EH_BUSINESS_ID if the field
- * map has none yet.
+ * Env (from .dev.vars or the shell): EH_API_KEY, and CT_API_KEY to find the
+ * award dropdown (`npm run provision-classification-field`). EH_BUSINESS_ID if
+ * the field map has none yet.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,8 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseFieldMap } from "../src/mapping/schema.js";
 import { applyPayRunChoice, primaryPayCategoryOptions, rateSourceOptions } from "./lib/pay-run-choice.js";
+import { listRawCustomFields } from "./lib/connecteam-custom-fields.js";
+import { AWARD_FIELD_NAME, findAwardField } from "./lib/award-field.js";
 
 // --- env -----------------------------------------------------------------
 
@@ -43,6 +46,14 @@ function arg(name: string): string | undefined {
 }
 
 // --- HTTP --------------------------------------------------------------
+
+async function ctGet(path: string): Promise<any> {
+  const r = await fetch(`https://api.connecteam.com${path}`, {
+    headers: { "X-API-KEY": process.env.CT_API_KEY!, accept: "application/json" },
+  });
+  if (!r.ok) throw new Error(`Connecteam GET ${path} -> ${r.status} ${await r.text()}`);
+  return r.json();
+}
 
 async function ehGet(path: string): Promise<any> {
   const r = await fetch(`https://api.yourpayroll.com.au/api/v2${path}`, {
@@ -125,9 +136,14 @@ async function main(): Promise<void> {
     category = await choose("All pay categories:", all, (c: any) => (c.note ? `${c.name}  (${c.note})` : c.name));
   }
 
-  const sources = rateSourceOptions(map);
+  // The award dropdown the wizard's award stage created, if any.
+  const awardField = process.env.CT_API_KEY ? findAwardField(await listRawCustomFields(ctGet)) : undefined;
+  const sources = rateSourceOptions(map, awardField?.id);
   if (!sources.some((s) => s.key === "award")) {
-    console.log("\n  (Award classification isn't offered: the field map has no award field yet - import it with\n   `npm run provision-classification-field`, then re-run `npm run pay-defaults -- --client " + client + "`.)");
+    console.log(
+      `\n  (Award classification isn't offered: there is no "${AWARD_FIELD_NAME}" field in Connecteam - import it with\n` +
+        `   npm run provision-classification-field, then re-run npm run pay-defaults -- --client ${client}.)`,
+    );
   }
   const rateSource = await choose("How does each employee's pay rate reach Employment Hero?", sources, (s) => s.label);
 
@@ -136,6 +152,7 @@ async function main(): Promise<void> {
     location: { id: location.id, name: location.name },
     primaryPayCategory: category.name,
     rateSource: rateSource.key,
+    ...(awardField ? { awardFieldId: Number(awardField.id) } : {}),
   });
   if (rateSource.key === "skip") {
     console.log("\nSkipped - the field map is unchanged. Payroll sets pay settings in Employment Hero by hand.");

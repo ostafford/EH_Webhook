@@ -8,6 +8,7 @@
  * with one - the award classification or each employee's Connecteam pay rate -
  * or not at all.
  */
+import { withAwardRule, withoutAwardRule } from "./award-field.js";
 
 export type RateSource = "award" | "connecteamPayRate" | "skip";
 
@@ -16,6 +17,8 @@ export interface PayRunChoice {
   location: { id: number | string; name: string };
   primaryPayCategory: string;
   rateSource: RateSource;
+  /** The award dropdown found in Connecteam, mapped when `rateSource` is "award". */
+  awardFieldId?: number;
 }
 
 /**
@@ -37,11 +40,12 @@ export function primaryPayCategoryOptions(raw: any[]): Array<{ name: string; not
   return [...byName].map(([name, awards]) => (awards.length ? { name, note: awards.join("; ") } : { name }));
 }
 
-export function rateSourceOptions(map: any): Array<{ key: RateSource; label: string }> {
-  const awardField = (map?.fields ?? []).find((f: any) => f?.eh === "payRateTemplate");
+/** `awardFieldId`: the award dropdown found in Connecteam, if any (preferred over a mapped one). */
+export function rateSourceOptions(map: any, awardFieldId?: number): Array<{ key: RateSource; label: string }> {
+  const fieldId = awardFieldId ?? (map?.fields ?? []).find((f: any) => f?.eh === "payRateTemplate")?.from?.customFieldId;
   return [
-    ...(awardField
-      ? [{ key: "award" as const, label: `Award classification, picked per employee in Connecteam (field ${awardField.from?.customFieldId})` }]
+    ...(fieldId !== undefined
+      ? [{ key: "award" as const, label: `Award classification, picked per employee in Connecteam (field ${fieldId})` }]
       : []),
     { key: "connecteamPayRate", label: "Each employee's pay rate in Connecteam" },
     { key: "skip", label: "Skip - payroll sets pay settings in Employment Hero by hand (leaves the field map as it is)" },
@@ -51,7 +55,13 @@ export function rateSourceOptions(map: any): Array<{ key: RateSource; label: str
 export function applyPayRunChoice<T>(map: T, choice: PayRunChoice): T {
   if (choice.rateSource === "skip") return map;
 
-  const out: any = structuredClone(map);
+  // One rate source only: the award rule goes in with the award, out without it.
+  const out: any =
+    choice.rateSource === "award"
+      ? choice.awardFieldId !== undefined
+        ? withAwardRule(map, choice.awardFieldId)
+        : structuredClone(map)
+      : withoutAwardRule(map);
   const eh = out.employmentHero;
   // The rate comes from the chosen source, never a flat company-wide value.
   const { rate: _rate, rateUnit: _rateUnit, payRateTemplate: _template, ...keep } = eh.defaults ?? {};

@@ -140,10 +140,23 @@ Connecteam when the webhook is registered (step 5). → **`CT_WEBHOOK_SECRET`**
 3. The structural IDs are discovered for you in the next step:
    - `businessId` — `GET /api/v2/business` → **`EH_BUSINESS_ID`**
 
-   Pay schedule and location are no longer deployment vars (issue #26). A
-   flat-rate workforce that opts into `employmentHero.defaults` names them there
-   instead; otherwise every record lands `Incomplete` on the pay-run axis and a
+   Pay schedule and location are no longer deployment vars (issue #26). The
+   wizard's Pay-run settings stage names them in `employmentHero.defaults`
+   (§4); skip it and every record lands `Incomplete` on the pay-run axis and a
    payroll admin finishes it by hand, unchanged.
+4. **Award (if the business pays under one).** Install the award(s) in EH (a
+   payroll and legal decision, so manual), then import its classifications
+   into Connecteam:
+
+   ```bash
+   npm run provision-classification-field
+   ```
+
+   This creates the admin-only Connecteam dropdown **EH Pay Rate Template**
+   with every EH classification as an option (the wizard's Award
+   classifications stage runs it). Admins then pick each employee's
+   classification on their Connecteam profile. It is mapped to the sync by the
+   Pay-run settings stage (§4) when you choose "Award classification".
 
 ---
 
@@ -483,6 +496,21 @@ A message on `eh-webhook-dlq` has already raised a System alert. After fixing th
 cause, re-drive it with `wrangler queues`, or re-trigger the source edit in
 Connecteam (edit the profile; first-time pack approval). Nothing auto-retries a
 dead-lettered job.
+
+### After an award review or a newly installed award
+
+EH updates award classifications after a Fair Work review, and installing a
+second award adds new ones. Copy them into the Connecteam dropdown:
+
+```bash
+npm run provision-classification-field -- --dry-run   # see what would be added
+npm run provision-classification-field
+```
+
+It only adds classifications the dropdown is missing; it never creates a
+second field and never changes an employee's existing pick. A renamed
+classification arrives as a new option, so admins should move affected
+employees to it.
 
 ### Rotating keys
 `npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` /
