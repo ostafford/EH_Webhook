@@ -280,9 +280,38 @@ ct_api_delete() {
 
 # put_secret NAME VALUE: pipe a value into `wrangler secret put` (no echo).
 put_secret() {
-  printf '%s' "$2" | wr secret put "$1" >/dev/null \
-    && printf '  %s✓ set%s Cloudflare secret %s\n' "$GREEN" "$RESET" "$1" \
-    || warn "could not set secret $1 - run: printf %%s '<value>' | npx wrangler secret put $1"
+  local out rc=0
+  out=$(printf '%s' "$2" | npx --yes wrangler secret put "$1" 2>&1) || rc=$?
+  { printf '\n$ wrangler secret put %s   (exit %s, %s)\n' "$1" "$rc" "$(date +%H:%M:%S)"; printf '%s\n' "$out"; } >> "$WIZARD_DETAILS"
+  if (( rc == 0 )); then
+    ok "Stored $3 on Cloudflare."
+  else
+    fail "Couldn't store $3 - run: printf %s '<value>' | npx wrangler secret put $1"
+    SKIPPED+=("Cloudflare secret $1: printf %s '<value>' | npx wrangler secret put $1")
+  fi
+}
+
+# Wrangler, quietly (#67). WIZARD_DETAILS keeps every wrangler call's full
+# output (git-ignored, cleaned and redacted like the session log); the screen
+# shows one plain line per step instead.
+WIZARD_DETAILS="${WIZARD_DETAILS:-$PWD/setup-wizard-$(date +%Y%m%d-%H%M%S)-wrangler.log}"
+
+# wr_quiet ARGS...: run wrangler with stdin from /dev/null - that makes it
+# non-interactive, so a confirm takes its built-in fallback answer (yes for
+# "apply migrations?", no for "add it on your behalf?") - and keep its output
+# out of sight: appended to $WIZARD_DETAILS and left in $WR_OUT.
+wr_quiet() {
+  local rc=0
+  WR_OUT=$(npx --yes wrangler "$@" < /dev/null 2>&1) || rc=$?
+  { printf '\n$ wrangler %s   (exit %s, %s)\n' "$*" "$rc" "$(date +%H:%M:%S)"; printf '%s\n' "$WR_OUT"; } >> "$WIZARD_DETAILS"
+  chmod 600 "$WIZARD_DETAILS" 2>/dev/null || true
+  return "$rc"
+}
+
+# show_wr_tail: the end of the last wrangler call's output, for a failure.
+show_wr_tail() {
+  printf '%s\n' "$WR_OUT" | perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' | tail -15 | sed 's/^/    /'
+  note "Full output: ${WIZARD_DETAILS#"$PWD"/}"
 }
 
 # health_num KEY: print the deployed Worker's /health ops.KEY as an integer
@@ -335,6 +364,7 @@ clean_log() {
 
 if [[ -z "${WIZARD_LOG:-}" && -t 0 && -t 1 ]] && command -v script >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
   export WIZARD_LOG="$PWD/setup-wizard-$(date +%Y%m%d-%H%M%S).log"
+  export WIZARD_DETAILS="${WIZARD_LOG%.log}-wrangler.log"
   # Ctrl-C stops the recorded wizard; this outer shell carries on to clean up.
   # A no-op handler, not `trap ''`: an ignored signal is inherited, and the
   # wizard itself would then ignore Ctrl-C.
@@ -346,6 +376,7 @@ if [[ -z "${WIZARD_LOG:-}" && -t 0 && -t 1 ]] && command -v script >/dev/null 2>
   fi
   trap - INT
   clean_log "$WIZARD_LOG"
+  clean_log "$WIZARD_DETAILS"
   printf '\n  %sA copy of this run is in %s - send it to your integrator if anything looked wrong.%s\n\n' \
     "$DIM" "${WIZARD_LOG#"$PWD"/}" "$RESET"
   exit "$rc"
@@ -574,17 +605,58 @@ why "The sync keeps a small notebook (a database) of which Connecteam person is"
     "an in-tray for work, and a problem tray so nothing is silently lost."
 printf '\n'
 confirm "Create the database and the two queues on this Cloudflare account now?" || { warn "Stopped here. Nothing was created on Cloudflare."; exit 1; }
-db_out=$(wr d1 create eh-webhook 2>&1 || true)
-printf '%s\n' "$db_out" | sed 's/^/  /'
-db_id=$(printf '%s' "$db_out" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-if [[ -z "$db_id" ]]; then
-  db_id=$(wr d1 list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const d=JSON.parse(s);const m=(Array.isArray(d)?d:d.result||[]).find(x=>x.name==="eh-webhook");console.log(m?m.uuid||m.database_id||"":"")}catch(e){console.log("")}})')
+printf '\n'
+
+# The database. "Already exists" means this is a re-run on a live integration.
+db_fresh=""
+if wr_quiet d1 create eh-webhook; then
+  db_fresh=1
+  ok "Database created."
+elif [[ "$WR_OUT" == *"already exists"* ]]; then
+  ok "Database already exists - reusing it."
+else
+  fail "Couldn't create the database:"; show_wr_tail; exit 1
 fi
-[[ -n "$db_id" ]] && set_jsonc database_id "$db_id" || warn "Put the D1 database_id into wrangler.jsonc by hand."
-say "Applying migrations to the remote database..."
-wr d1 migrations apply eh-webhook --remote
-wr queues create eh-webhook-sync 2>&1 | sed 's/^/  /' || true
-wr queues create eh-webhook-dlq  2>&1 | sed 's/^/  /' || true
+db_id=$(printf '%s' "$WR_OUT" | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+if [[ -z "$db_id" ]] && wr_quiet d1 list --json; then
+  db_id=$(printf '%s' "$WR_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const d=JSON.parse(s.slice(s.indexOf("[")));const m=d.find(x=>x.name==="eh-webhook");console.log(m?m.uuid||m.database_id||"":"")}catch(e){console.log("")}})')
+fi
+if [[ -n "$db_id" ]]; then
+  set_jsonc database_id "$db_id" >/dev/null
+else
+  warn "Put the database ID into wrangler.jsonc by hand (npx wrangler d1 list shows it)."
+fi
+
+# Its setup steps (migrations). Read-only first: a fresh database has all of
+# them pending, a live one usually none. wr_quiet answers wrangler's
+# "may not be available during the migration, continue?" with its fallback,
+# yes - the only sensible answer for a brand-new, empty database.
+wr_quiet d1 migrations list eh-webhook --remote || { fail "Couldn't read the database's setup steps:"; show_wr_tail; exit 1; }
+pending=$(printf '%s\n' "$WR_OUT" | { grep -oE '[0-9]{4}_[A-Za-z0-9_]+\.sql' || true; } | sort -u | wc -l | tr -d ' ')
+if [[ "$WR_OUT" == *"No migrations to apply"* || "$pending" -eq 0 ]]; then
+  ok "Database is up to date."
+else
+  if [[ -z "$db_fresh" ]]; then
+    printf '\n'
+    warn "Your integration is already running. Updating its storage ($pending step(s)) may"
+    warn "pause syncing for a few seconds."
+    confirm "Update the storage now" || { warn "Stopped here - the new version needs this update before it can be deployed."; exit 1; }
+  fi
+  if wr_quiet d1 migrations apply eh-webhook --remote; then
+    ok "Database set up ($pending step(s))."
+  else
+    fail "Couldn't set up the database:"; show_wr_tail; exit 1
+  fi
+fi
+
+# The queues. "Already exists" is fine; then confirm both are there.
+wr_quiet queues create eh-webhook-sync || true
+wr_quiet queues create eh-webhook-dlq || true
+if wr_quiet queues list && [[ "$WR_OUT" =~ [[:space:]]eh-webhook-sync[[:space:]] && "$WR_OUT" =~ [[:space:]]eh-webhook-dlq[[:space:]] ]]; then
+  ok "Queues ready (the in-tray and the problem tray)."
+else
+  fail "Couldn't confirm both queues exist:"; show_wr_tail; exit 1
+fi
 next_up "put the sync live."
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -592,19 +664,24 @@ stage "Push secrets + deploy"
 why "This puts the sync live on your Cloudflare account and stores the two API" \
     "keys and the webhook secret there, where only the sync can read them."
 printf '\n'
-put_secret CT_API_KEY "$CT_API_KEY"
-put_secret EH_API_KEY "$EH_API_KEY"
-put_secret CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET"
-say "Deploying..."
-deploy_out=$(wr deploy 2>&1)
-printf '%s\n' "$deploy_out" | sed 's/^/  /'
-WORKER_URL=$(printf '%s' "$deploy_out" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1)
+put_secret CT_API_KEY "$CT_API_KEY" "the Connecteam API key"
+put_secret EH_API_KEY "$EH_API_KEY" "the Employment Hero API key"
+put_secret CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET" "the webhook secret"
+printf '\n'
+say "Deploying (this takes about a minute)..."
+wr_quiet deploy || { fail "The deploy failed:"; show_wr_tail; exit 1; }
+WORKER_URL=$(printf '%s' "$WR_OUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)
 if [[ -n "$WORKER_URL" ]]; then
-  say "Health check:"
-  curl -fsS "$WORKER_URL/health" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const h=JSON.parse(s);console.log("   ok:",h.ok,"| d1:",h.d1,"| fieldMap:",h.fieldMap)})' \
-    || warn "/health did not return 200 - inspect: $WORKER_URL/health"
+  ok "Deployed: $WORKER_URL"
+  health=$(curl -fsS "$WORKER_URL/health" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const h=JSON.parse(s);console.log(h.ok&&h.d1==="ok"&&h.fieldMap==="ok"?"ok":`d1: ${h.d1}, field map: ${h.fieldMap}`)}catch(e){console.log("unreadable")}})' || true)
+  if [[ "$health" == "ok" ]]; then
+    ok "Health check passed: the database and the field map are OK."
+  else
+    warn "The health check didn't pass (${health:-no answer}) - open $WORKER_URL/health to see why."
+  fi
 else
-  warn "Could not read the deployed URL from wrangler output - check the dashboard."
+  warn "Couldn't read the sync's address from the deploy - find it in the Cloudflare dashboard (Workers)."
+  note "Full output: ${WIZARD_DETAILS#"$PWD"/}"
 fi
 next_up "connect Connecteam's profile updates to the sync."
 

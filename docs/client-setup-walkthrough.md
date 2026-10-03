@@ -39,14 +39,15 @@ webhook, and up to 15 for Cloudflare to start the first approval check
 | 8 | Connecteam field check | Reads the table; creates missing fields if offered; **attaches new fields to the onboarding pack** by hand | `28 ok · 0 required missing or wrong · 0 warnings` when everything is in place | 1–5 min |
 | 9 | Field map | Nothing, unless their fields changed since a previous run | A new client: "Built your field map from your Connecteam fields". A re-run: "Nothing to change", or the differences to copy across | 1 min |
 | 10 | Pay-run settings | Picks pay schedule, location and primary pay category from their EH lists, then the pay rate source | "Saved to …", then the tests pass | 1–2 min |
-| 11 | Provision Cloudflare resources | Confirms | A D1 database and two queues created | 1 min |
-| 12 | Push secrets + deploy | Waits | The Worker's URL and a health check | 1–2 min |
+| 11 | Provision Cloudflare resources | Confirms (the only question in this stage) | ✓ Database created · ✓ Database set up (4 steps) · ✓ Queues ready | 1 min |
+| 12 | Push secrets + deploy | Waits | ✓ Stored … (×3) · ✓ Deployed: the Worker's address · ✓ Health check passed | 1–2 min |
 | 13 | Register the webhook | Edits a test profile when asked | The webhook listed as `enabled`, then "the Worker accepted a profile update" | 2 min |
 | — | First approval check | Optionally waits | "✓ the first approval check ran" (up to 15 min on a first deploy) | 0–15 min |
 
 **A copy of the run** is saved as `setup-wizard-<date>-<time>.log` in the repo
 folder (git-ignored), as plain text with every API key and secret replaced by
-`[redacted]`. The screen clears at each stage, so if anything looked wrong,
+`[redacted]`. Cloudflare's own output from stages 11–12 is kept beside it in
+`setup-wizard-<date>-<time>-wrangler.log`. The screen clears at each stage, so if anything looked wrong,
 ask the client to send you that file.
 
 **After the wizard**, together: approve a test employee's onboarding pack and
@@ -55,11 +56,8 @@ that takes about a minute.
 
 ## Known rough edges
 
-None of these stop the setup, but expect a question about them on the call.
-
-| Where | What the client sees | Issue |
-|---|---|---|
-| Stages 11–12 | Raw wrangler output, and a migration prompt on a fresh install | #67 |
+None left from the rehearsals (#73). If the client hits something new, the
+session log (below) is the first thing to ask for.
 
 **Re-running the wizard on a live deployment** is safe for the webhook since
 #82. It keeps the existing secret and updates the existing webhook instead of
