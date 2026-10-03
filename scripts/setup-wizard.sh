@@ -214,6 +214,15 @@ ct_api_post() {
     -H "accept: application/json" -d "$2" "https://api.connecteam.com$1"
 }
 
+# ct_api_put PATH JSON / ct_api_delete PATH: the same, for updates and deletes.
+ct_api_put() {
+  curl -sS -X PUT -H "X-API-KEY: $CT_API_KEY" -H "content-type: application/json" \
+    -H "accept: application/json" -d "$2" "https://api.connecteam.com$1"
+}
+ct_api_delete() {
+  curl -sS -X DELETE -H "X-API-KEY: $CT_API_KEY" -H "accept: application/json" "https://api.connecteam.com$1"
+}
+
 # put_secret NAME VALUE: pipe a value into `wrangler secret put` (no echo).
 put_secret() {
   printf '%s' "$2" | wr secret put "$1" >/dev/null \
@@ -314,9 +323,15 @@ fi
 ask CT_ONBOARDING_PACK_ID "Paste the onboarding pack ID:"
 write_env CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
 set_jsonc CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID"
-CT_WEBHOOK_SECRET=$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')
-write_env CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET"
-say "Generated CT_WEBHOOK_SECRET (used when registering the webhook in the last stage)."
+# Keep an existing secret on a re-run: a new one would no longer match the
+# webhook Connecteam already has, and every delivery would get a 401 (#82).
+if CT_WEBHOOK_SECRET=$(_existing CT_WEBHOOK_SECRET) && [[ -n "$CT_WEBHOOK_SECRET" ]]; then
+  say "Kept the existing CT_WEBHOOK_SECRET from $ENV_FILE (used when registering the webhook in the last stage)."
+else
+  CT_WEBHOOK_SECRET=$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')
+  write_env CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET"
+  say "Generated CT_WEBHOOK_SECRET (used when registering the webhook in the last stage)."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Employment Hero: API key"
@@ -454,14 +469,50 @@ say "The signing secret (secretKey) can ONLY be set via the API - the Connecteam
 say "UI has no field for it, and the Worker rejects every unsigned delivery with"
 say "401. So the wizard registers it here rather than sending you to the UI."
 if [[ -n "${WORKER_URL:-}" ]]; then
-  reg=$(ct_api_post "/settings/v1/webhooks" "$(printf '{"name":"EH Payroll Sync (profile updates)","url":"%s","featureType":"users","eventTypes":["user_updated"],"secretKey":"%s"}' "$WEBHOOK_TARGET" "$CT_WEBHOOK_SECRET")")
-  wid=$(printf '%s' "$reg" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).data?.id||"")}catch(e){console.log("")}})')
-  if [[ -n "$wid" ]]; then
-    printf '  %s✓ registered%s webhook id %s\n' "$GREEN" "$RESET" "$wid"
+  wh_body=$(printf '{"name":"EH Payroll Sync (profile updates)","url":"%s","featureType":"users","eventTypes":["user_updated"],"secretKey":"%s","isDisabled":false}' "$WEBHOOK_TARGET" "$CT_WEBHOOK_SECRET")
+  # Re-running must not add a second webhook (#82): update one already pointing
+  # at this Worker - same secret as the Worker, turned on - and offer to delete
+  # any extras.
+  existing_ids=$(ct_api "/settings/v1/webhooks" | node -e '
+    let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+      try {
+        const list = JSON.parse(s).data?.webhooks || [];
+        console.log(list.filter(w => w.url === process.argv[1] && w.featureType === "users").map(w => w.id).join(" "));
+      } catch (e) { console.log(""); }
+    })' "$WEBHOOK_TARGET")
+  read -r -a existing <<< "$existing_ids"
+  if (( ${#existing[@]} > 0 )); then
+    wid="${existing[0]}"
+    upd=$(ct_api_put "/settings/v1/webhooks/$wid" "$wh_body")
+    wh_updated=""
+    if printf '%s' "$upd" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.detail||j.error?1:0)}catch(e){process.exit(1)}})'; then
+      wh_updated=1
+      printf '  %s✓ updated%s the existing webhook id %s (current secret, turned on) - no new one added\n' "$GREEN" "$RESET" "$wid"
+    else
+      warn "could not update the existing webhook $wid. Response:"
+      printf '%s\n' "$upd" | sed 's/^/    /'
+      SKIPPED+=("Connecteam webhook $wid - update its secretKey to CT_WEBHOOK_SECRET: PUT /settings/v1/webhooks/$wid (docs/RUNBOOK.md step 6)")
+    fi
+    # Only once the update worked: until then an extra may be the one that works.
+    if [[ -n "$wh_updated" ]] && (( ${#existing[@]} > 1 )); then
+      extras=("${existing[@]:1}")
+      warn "${#extras[@]} more webhook(s) point at this Worker (ids ${extras[*]}), from earlier runs."
+      if confirm "Delete the extra webhook(s) ${extras[*]} in Connecteam"; then
+        for x in "${extras[@]}"; do
+          ct_api_delete "/settings/v1/webhooks/$x" >/dev/null && printf '  %s✓ deleted%s webhook id %s\n' "$GREEN" "$RESET" "$x"
+        done
+      fi
+    fi
   else
-    warn "could not confirm the webhook registered. Response:"
-    printf '%s\n' "$reg" | sed 's/^/    /'
-    SKIPPED+=("Connecteam webhook - register by API: POST /settings/v1/webhooks (see docs/RUNBOOK.md step 6)")
+    reg=$(ct_api_post "/settings/v1/webhooks" "$wh_body")
+    wid=$(printf '%s' "$reg" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).data?.id||"")}catch(e){console.log("")}})')
+    if [[ -n "$wid" ]]; then
+      printf '  %s✓ registered%s webhook id %s\n' "$GREEN" "$RESET" "$wid"
+    else
+      warn "could not confirm the webhook registered. Response:"
+      printf '%s\n' "$reg" | sed 's/^/    /'
+      SKIPPED+=("Connecteam webhook - register by API: POST /settings/v1/webhooks (see docs/RUNBOOK.md step 6)")
+    fi
   fi
 else
   warn "no deployed URL captured - register the webhook by hand once the Worker is live (docs/RUNBOOK.md step 6)."
@@ -539,9 +590,9 @@ if [[ -n "${WORKER_URL:-}" ]] && confirm "Do a live delivery check now (edit a t
         say "The webhook path is live." ;;
       rejected)
         warn "a delivery ARRIVED but was rejected (401): the secretKey Connecteam sends"
-        warn "does not match CT_WEBHOOK_SECRET. Delete the webhook in Connecteam and"
-        warn "re-run this stage to re-register it with the current secret."
-        SKIPPED+=("Webhook secret mismatch - re-register the Connecteam webhook (docs/RUNBOOK.md step 6)") ;;
+        warn "does not match CT_WEBHOOK_SECRET. Re-run the wizard: its webhook stage now"
+        warn "updates the existing webhook with the current secret (no new one is added)."
+        SKIPPED+=("Webhook secret mismatch - re-run the wizard to update the Connecteam webhook's secret (docs/RUNBOOK.md step 6)") ;;
       *)
         warn "no delivery seen in 90s. Usual causes:"
         note "  - the registered URL is not exactly $WEBHOOK_TARGET"
