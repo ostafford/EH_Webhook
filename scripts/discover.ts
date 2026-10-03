@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   if (write.action === "draft") {
     console.log(`\nKept ${mapFile} - it is already set up for this account (pack ${packId}, business ${businessId}).`);
     console.log(`Wrote DRAFT ${outFile}  (${schema})`);
-    console.log("  Your map vs the draft (settings discover never produces - pay-run defaults, required/default rules - are not compared):");
+    console.log("  Your map vs the draft (which Connecteam field feeds each EH field; pay-run settings and rule options aren't compared):");
     console.log(diffFieldMaps(existing, draft).map((l) => "    " + l).join("\n"));
   } else {
     if (write.action === "replace") {

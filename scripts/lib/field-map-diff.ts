@@ -3,8 +3,8 @@
  * a readable diff between the two (issue #62).
  *
  * A tuned map holds settings discover never produces (pay-run defaults, the
- * award field, `required` / `default` rules), so it is only replaced when it
- * belongs to another account - e.g. the demo map shipped in a fresh clone.
+ * award field, any hand edits), so it is only replaced when it belongs to
+ * another account - e.g. the demo map shipped in a fresh clone.
  */
 
 export type FieldMapWrite =
