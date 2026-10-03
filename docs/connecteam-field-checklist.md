@@ -108,8 +108,10 @@ One account only, set to 100% and paid electronically.
 
 ## 🩺 Field check: what each result means and how to fix it
 
-The wizard's field check (planned) reads the client's Connecteam fields and
-gives each one a result:
+The wizard's field check (`npm run field-check`, its "Connecteam field check"
+stage) reads the client's Connecteam fields and gives each one a result. A 🔴
+required field that is missing or the wrong type stops the wizard until it is
+fixed; everything else is a warning.
 
 | Result | Meaning | Why it matters | How to fix |
 |---|---|---|---|
@@ -120,6 +122,10 @@ gives each one a result:
 | ⚠️ **Dropdown options don't match** | E.g. Employee Status has `Full time` instead of `FullTime` | EH rejects anything it doesn't recognise | Rename the options to the exact values above, or map them in the field map |
 | ⚠️ **Editable by employees** | The award field can be edited by the employee | An employee could pick their own pay classification | Set the field to admin-only |
 | ⚠️ **No answers yet** | The field exists, but nobody has filled it in | Not an error for new fields. Existing approved employees will sync with this gap | Ask existing employees to complete the field, then re-approve |
+
+Two of these can't be checked automatically, so the wizard reminds you instead:
+**Not in the pack** (Connecteam's API doesn't say which fields a pack includes)
+and **No answers yet** (that would mean reading employees' answers).
 
 ---
 
