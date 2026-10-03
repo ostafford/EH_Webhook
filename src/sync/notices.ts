@@ -31,7 +31,7 @@
 import { sha256Hex } from "./canonical.js";
 import type { SyncGateway } from "./gateway.js";
 
-export type NoticeKind = "correction" | "follow_up" | "system_alert" | "collision";
+export type NoticeKind = "correction" | "manager_escalation" | "follow_up" | "system_alert" | "collision";
 
 /** A follow-up can wait on a payroll admin for a while - at most twice a day. */
 export const FOLLOW_UP_NOTICE_DEDUPE_MS = 12 * 60 * 60 * 1000;
@@ -67,8 +67,9 @@ export async function noticeKey(
 
 /**
  * True if this exact notice has NOT gone out within `windowMs`. On true it also
- * stamps the send time, so a caller can simply
- * `if (await shouldPostNotice(...)) await send()`.
+ * stamps the send time - a claim taken BEFORE the send, so a re-run of the job
+ * skips it (ADR-0007). A caller must check the send's result and
+ * {@link releaseNotice} on failure, or a failed send is lost (issue #89).
  */
 export async function shouldPostNotice(
   store: MetaStore,
@@ -80,4 +81,12 @@ export async function shouldPostNotice(
   if (last > 0 && now - last < windowMs) return false;
   await store.setMarker(key, now);
   return true;
+}
+
+/**
+ * Undo a {@link shouldPostNotice} claim whose send failed, so the job's retry
+ * sends it. A 0 marker reads as "never sent".
+ */
+export async function releaseNotice(store: Pick<MetaStore, "setMarker">, key: string): Promise<void> {
+  await store.setMarker(key, 0);
 }

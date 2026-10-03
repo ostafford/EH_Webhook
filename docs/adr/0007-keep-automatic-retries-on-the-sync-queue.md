@@ -16,9 +16,11 @@ write the same records twice.
 A Sync job is retried in two ways:
 
 1. **It asks for one.** `runSyncJob` returns `status: "retry"` when Connecteam
-   or Employment Hero is unavailable or returns an unexpected error. Every such
-   return happens before any message is sent or any state is saved. The only
-   earlier side effect is the EH write itself (row 1 below).
+   or Employment Hero is unavailable or returns an unexpected error, or when a
+   Connecteam message fails to send (#89). Every such return happens before
+   the link or audit row is saved. Earlier side effects are the EH write
+   (row 1 below) and any message that already went out, which its claim
+   stops the retry from repeating.
 2. **It crashes partway**, from an unexpected throw or the Worker being evicted
    before the ack. The queue redelivers the message and the whole job runs
    again from the start. This is the case the playbook warns about.
@@ -31,14 +33,14 @@ below, with what a full re-run does to it.
 |---|---|---|---|---|
 | 1 | **Employment Hero employee record** | `upsertByExternalId`: `GET …/externalid/{id}`, then `POST` if absent or `PUT` if present | If EH applied a write we never saw the answer to (e.g. a timeout), the re-run's `GET` finds it and `PUT`s the same payload. No second employee. | Idempotent |
 | 2 | Read-back of the record | `GET` | Read only | — |
-| 3 | **Correction message** to the employee, plus their **Direct manager** on cycle 3+ | Claim a `sync_meta` key (user + mapped-payload hash, 1 h) **before** sending, then bump the cycle, then send | The claim is found, so no second message and no second cycle bump (#58) | At most once |
-| 4 | Failure-cycle count | `advanceCycle` | Correction: inside the claim (row 3). OK / Manual follow-up: set to 0, which can repeat | Idempotent |
-| 5 | **Manual-follow-up notice** to the alerts channel | Claim (user + reasons, 12 h) before sending | Not re-sent | At most once |
-| 6 | **Collision alert** to the alerts channel | Claim (1 h) before sending | Not re-sent | At most once |
+| 3 | **Correction message** to the employee, plus their **Direct manager** on cycle 3+ | One `sync_meta` claim per recipient (user + mapped-payload hash, 1 h), taken **before** sending. Employee: claim, send, then bump the cycle. Manager: its own claim, then send. A failed send releases its claim and the job retries (#89) | A claim that's held is skipped: no second message and no second cycle bump (#58). A released claim is sent by the retry | At most once per recipient |
+| 4 | Failure-cycle count | `advanceCycle` | Correction: inside the employee claim, after the send succeeds (row 3). OK / Manual follow-up: set to 0, which can repeat | Idempotent |
+| 5 | **Manual-follow-up notice** to the alerts channel | Claim (user + reasons, 12 h) before sending; released on a failed send, and the job retries | Not re-sent once sent | At most once |
+| 6 | **Collision alert** to the alerts channel | Claim (1 h) before sending; released on a failed send, and the job retries before its audit row | Not re-sent once sent | At most once |
 | 7 | `employee_map` link (`lastSyncedTs`, `lastPayloadHash`, `lastOutcome`) | Upsert of one row | Same values. Once saved, the stale-event guard and the payload hash skip any later redelivery of this job before step 1 | Idempotent |
 | 8 | `sync_log` audit row | `INSERT`, written last | Normally skipped by row 7's guard. **Exception:** the collision path doesn't save a link, so a redelivery appends a second identical `collision` row | Audit only; can repeat on collisions |
 | 9 | `acked_total` counter | Bumped once per batch, after the acks | A crash between an ack and the bump under-counts. The `/health` `queueBacklog` gauge can then stay above 0 | Gauge drift only |
-| 10 | Dead-letter queue: **System alert**, `dead_letter` audit row, integrator alert | Alert claimed (1 h); row `INSERT`; integrator alert de-duplicated per user (1 h, `src/index.ts`); DLQ messages are always acked | No repeated alerts; the row can repeat if the DLQ itself redelivers | At most once / audit |
+| 10 | Dead-letter queue: **System alert**, `dead_letter` audit row, integrator alert | Alert claimed (1 h); a failed send releases the claim (can't retry, the DLQ always acks), so the next dead-letter for that user posts it; row `INSERT`; integrator alert de-duplicated per user (1 h, `src/index.ts`) | No repeated alerts; the row can repeat if the DLQ itself redelivers | At most once / audit |
 
 Nothing a person or Employment Hero sees can be duplicated by a re-run. The
 only repeatable writes are an audit row on the collision path and a health
@@ -83,13 +85,23 @@ would have succeeded.
   (`wrangler.jsonc` deliberately has no comment: the live deploy folder keeps
   its settings as uncommitted edits to that file, and upstream changes to it
   would block updating that folder.)
-- **At-most-once has a cost:** a message can be **lost**. Each claim is stamped
-  before the send, and the send's result isn't checked. So if a Connecteam send
-  fails, or the Worker crashes between the claim and the send, that Correction
-  message or notice never goes out and nothing says so. The re-run sees the
-  claim and skips it, and the saved link stops later redeliveries. The
-  employee only hears again after their next edit. This is a separate gap from
-  retries; tracked in #89.
+- **A failed send is retried, not lost (#89).** Every send's result is
+  checked. On failure the claim is released, a `message_send_failed` event is
+  logged, and the job returns `status: "retry"` before saving its link, so the
+  queue redelivers it and the retry sends the message. If Connecteam stays
+  down through every retry, the job dead-letters to a System alert. Each
+  recipient of a Correction has its own claim, so a failed manager DM is
+  retried without DMing the employee again. The cycle is bumped only after the
+  employee DM succeeds, so a failed send never double-bumps it.
+- **At-most-once still has a cost, now narrower:** a crash *between* a claim
+  and its send (the Worker evicted mid-send) still loses that message. The
+  re-run sees the claim and skips it. A crash between the employee DM and the
+  cycle bump leaves the count one short (the message did go out). Both need an
+  eviction in a window of milliseconds; a send that *reports* failure, the
+  common case, is covered above.
+- **The retry delay bounds the claim windows.** A retried message must arrive
+  while its claims are still held (Correction: 1 h). The total retry window
+  must stay well under that, or a late retry could re-send a message. See #90.
 - **No retry delay is configured** (`retry_delay` on the consumer, or a delay on
   `message.retry()`). The five retries can therefore be used up quickly during
   an Employment Hero outage of a few minutes, sending the job to the
