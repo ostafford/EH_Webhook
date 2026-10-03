@@ -323,6 +323,11 @@ npm run discover -- --client self
 say ""
 warn "Now open clients/self/field-map.json and check EVERY mapped field ID,"
 warn "resolve any TODO, and confirm the enum maps (gender / state / employmentType)."
+if [[ -f clients/self/field-map.draft.json ]]; then
+  note "Your existing map was kept (it is already set up for this account). The"
+  note "fresh draft is in clients/self/field-map.draft.json; copy across anything"
+  note "the differences above show you need."
+fi
 pause "Press Enter when the field map is tuned."
 v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).businessId||'')")
 if [[ -z "$v" || "$v" == "TODO" ]]; then

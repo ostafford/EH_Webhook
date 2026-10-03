@@ -161,8 +161,11 @@ files below. It works on a fresh onboarding pack that nobody has filled in yet. 
 cover the whole account, and the API can't tell which fields are attached to
 the pack, so confirm that in the Connecteam UI.
 
-- **`clients/self/field-map.json`** — a schema-checked draft mapping (overwrites
-  the placeholder that ships in the repo).
+- **`clients/self/field-map.json`** — a schema-checked draft mapping. It replaces
+  the map that ships in the repo (set up for another account), but **never** a
+  map already set up for this account (same Connecteam pack + EH business):
+  then it writes `field-map.draft.json` beside it (git-ignored) and prints what
+  differs, so tuning such as pay-run defaults and the award field is kept.
 - **stdout** — a configuration checklist: every var and secret with the
   discovered value or a `TODO` and where to find it.
 

@@ -32,3 +32,6 @@ coverage/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# discover writes this beside a tuned map instead of overwriting it (#62)
+clients/*/field-map.draft.json

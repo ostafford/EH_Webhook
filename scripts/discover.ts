@@ -4,7 +4,10 @@
  * Talks to a prospective client's Connecteam and Employment Hero accounts with
  * the two API keys, and writes:
  *   - clients/<slug>/field-map.json   — a DRAFT mapping (every mapped field is a
- *                                        best-effort name match; TODOs elsewhere)
+ *                                        best-effort name match; TODOs elsewhere).
+ *                                        A map already set up for THIS account is
+ *                                        never overwritten: the draft goes to
+ *                                        field-map.draft.json, with a diff printed.
  *   - stdout                          — a configuration checklist (every var and
  *                                        secret, with the discovered value or a TODO)
  *
@@ -17,12 +20,13 @@
  * Env (from .dev.vars or the shell): CT_API_KEY, EH_API_KEY.
  * Optional: EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID (skip the pickers).
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { parseFieldMap } from "../src/mapping/schema.js";
 import { listCustomFieldDefinitions } from "./lib/connecteam-custom-fields.js";
 import { buildFieldMapDraft } from "./lib/discover-draft.js";
+import { chooseFieldMapWrite, diffFieldMaps } from "./lib/field-map-diff.js";
 
 // --- env -----------------------------------------------------------------
 
@@ -103,8 +107,21 @@ async function main(): Promise<void> {
 
   const outDir = arg("out") ?? join(dirname(fileURLToPath(import.meta.url)), "..", "clients", client);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-  const outFile = join(outDir, "field-map.json");
+  const mapFile = join(outDir, "field-map.json");
+  let existing: unknown;
+  if (existsSync(mapFile)) {
+    try {
+      existing = JSON.parse(readFileSync(mapFile, "utf8"));
+    } catch {
+      existing = null; // unreadable - keep it, write a draft beside it
+    }
+  }
+  const write = chooseFieldMapWrite(existing, draft);
+  const draftFile = join(outDir, "field-map.draft.json");
+  const outFile = write.action === "draft" ? draftFile : mapFile;
   writeFileSync(outFile, JSON.stringify(draft, null, 2) + "\n");
+  // A draft left by an earlier run would no longer describe the map.
+  if (write.action !== "draft") rmSync(draftFile, { force: true });
 
   let schema = "valid against the field-map schema";
   try {
@@ -114,7 +131,20 @@ async function main(): Promise<void> {
   }
 
   const line = (k: string, v: string) => `  ${k.padEnd(28)} ${v}`;
-  console.log(`\nWrote DRAFT ${outFile}  (${schema})`);
+  if (write.action === "draft") {
+    console.log(`\nKept ${mapFile} - it is already set up for this account (pack ${packId}, business ${businessId}).`);
+    console.log(`Wrote DRAFT ${outFile}  (${schema})`);
+    console.log("  Your map vs the draft (settings discover never produces - pay-run defaults, required/default rules - are not compared):");
+    console.log(diffFieldMaps(existing, draft).map((l) => "    " + l).join("\n"));
+  } else {
+    if (write.action === "replace") {
+      console.log(
+        `\nReplaced ${mapFile} - it was for another account (pack ${String(write.previous.packId)}, ` +
+          `business ${String(write.previous.businessId)}), not this one (pack ${packId}, business ${businessId}).`,
+      );
+    }
+    console.log(`\nWrote DRAFT ${outFile}  (${schema})`);
+  }
   console.log(`  ${mappedCount} fields mapped by name; ${ruleFedCount} fields fed into rules; ${unmapped.length} left for review.`);
   if (unmapped.length) {
     console.log("  Connecteam custom fields not in the draft (expected: Direct manager, Pay Type, Employee Type, Payment Method):");
