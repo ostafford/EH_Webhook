@@ -183,7 +183,7 @@ async function main(): Promise<void> {
   if (multiTenant) console.log(line("FIELD_MAP_CLIENT", client));
   console.log(line("EH_BUSINESS_ID", businessId || "TODO  (GET /api/v2/business)"));
   console.log(line("CT_ONBOARDING_PACK_ID", String(packId)));
-  console.log(line("CT_CUSTOM_PUBLISHER_ID", "TODO  (Connecteam > Settings > Feed settings)"));
+  console.log(line("CT_CUSTOM_PUBLISHER_ID", "TODO  (Connecteam > Settings > Custom Publishers)"));
   console.log(line("ADMIN_CONNECTEAM_CHANNEL_ID", "TODO  (GET /chat/v1/conversations, the 'EH Sync Alerts' channel)"));
   console.log("\n  secrets (wrangler secret put):");
   console.log(line("CT_API_KEY", "have"));

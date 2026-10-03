@@ -339,7 +339,7 @@ next_up "Connecteam - the API key the sync uses to read your onboarding packs."
 stage "Connecteam: API key"
 why "The sync uses this key to read approved onboarding packs and to send" \
     "messages in Connecteam. It is stored only on your Cloudflare account."
-todo "On the page that opens (Connecteam's API settings), create a new API key." \
+todo "On the page that opens (Connecteam: Integrations > API Keys), create a new API key." \
      "Give it read access to users and onboarding, and write access to chat and to custom fields (stages 7 and 8 use that)." \
      "Paste it here. It won't show as you type."
 open_url "https://app.connecteam.com/#/settings/integrations/api"
@@ -352,7 +352,7 @@ next_up "the sender name on the sync's messages."
 stage "Connecteam: custom publisher"
 why "Every message the sync sends - to an employee or to your admins - comes" \
     "from this sender, so it reads as \"EH Sync\" rather than one of your staff."
-todo "In Connecteam's Settings, open Feed settings, then Custom publishers." \
+todo "In Connecteam, open Settings > Custom Publishers." \
      "Create one called \"EH Sync\" and copy its number (the publisher ID)." \
      "Paste it here."
 open_url "https://app.connecteam.com/#/settings"
@@ -386,7 +386,7 @@ next_up "the onboarding pack your new employees fill in."
 stage "Connecteam: onboarding pack"
 why "When an admin approves a new employee's onboarding pack, the sync creates" \
     "that employee in Employment Hero. It needs to know which pack to watch."
-todo "Make sure the pack exists in Connecteam (Settings > Onboarding) and has an approval step." \
+todo "Make sure the pack exists in Connecteam (HR & Skills > Onboarding) and has an approval step." \
      "Pick it from the list below and paste its number."
 pause "Press Enter once the onboarding pack exists."
 printf '\n'
@@ -414,7 +414,7 @@ next_up "Employment Hero - the API key the sync uses to create employees."
 stage "Employment Hero: API key"
 why "The sync uses this key to create and update employees in Employment Hero" \
     "Payroll. Like the Connecteam key, it is stored only on your Cloudflare account."
-todo "On the page that opens, sign in to Employment Hero Payroll and create an API key." \
+todo "On the page that opens, sign in to Employment Hero Payroll and open My Account > Security > API Key." \
      "Turn OFF the employee self-setup email for the business: the sync fills in each employee's details itself, so the email would only confuse them." \
      "Paste the key here. It won't show as you type."
 open_url "https://api.yourpayroll.com.au"

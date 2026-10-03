@@ -84,13 +84,13 @@ The Worker cannot create these — a human makes them in the Connecteam UI and t
 wizard captures the IDs. The integrator usually drives this part of the call.
 
 ### 2a. API key
-Settings → API. Create a key with **read** on users + onboarding and **write** on
+Integrations → API Keys. Create a key with **read** on users + onboarding and **write** on
 chat. During setup it also needs **write on custom fields**: the wizard creates
 the missing fields (2f) and the award dropdown (§3). → **`CT_API_KEY`**
 (Cloudflare secret).
 
 ### 2b. Custom publisher — *the sender of every message*
-Settings → Feed settings → create a custom publisher named e.g. **"EH Sync"**.
+Settings → Custom Publishers → create one named e.g. **"EH Sync"**.
 Note its **publisher ID**.
 
 - **What it is:** a named non-human sender that the Connecteam chat API can post as.
@@ -123,7 +123,8 @@ so you can pick its ID.
 → **`ADMIN_CONNECTEAM_CHANNEL_ID`** (`wrangler.jsonc` var).
 
 ### 2d. Onboarding pack
-The pack employees complete. The wizard lists packs via `GET /onboarding/v1/packs`.
+The pack employees complete (HR & Skills → Onboarding), with an approval step.
+The wizard lists packs via `GET /onboarding/v1/packs`.
 → **`CT_ONBOARDING_PACK_ID`** (`wrangler.jsonc` var).
 
 ### 2e. Webhook secret
@@ -155,7 +156,7 @@ never asked, so it is always blank.
 
 ## 3. Employment Hero Payroll setup
 
-1. Create an API key → **`EH_API_KEY`** (Cloudflare secret).
+1. Create an API key (My Account → Security → API Key) → **`EH_API_KEY`** (Cloudflare secret).
 2. **Disable the employee self-setup email** for the business (Payroll settings →
    employee onboarding). The sync creates and completes the record via the API;
    the setup email would confuse employees.
