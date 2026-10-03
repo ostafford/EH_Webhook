@@ -44,6 +44,11 @@ webhook, and up to 15 for Cloudflare to start the first approval check
 | 13 | Register the webhook | Edits a test profile when asked | The webhook listed as `enabled`, then "the Worker accepted a profile update" | 2 min |
 | — | First approval check | Optionally waits | "✓ the first approval check ran" (up to 15 min on a first deploy) | 0–15 min |
 
+**A copy of the run** is saved as `setup-wizard-<date>-<time>.log` in the repo
+folder (git-ignored), as plain text with every API key and secret replaced by
+`[redacted]`. The screen clears at each stage, so if anything looked wrong,
+ask the client to send you that file.
+
 **After the wizard**, together: approve a test employee's onboarding pack and
 watch them appear in Employment Hero. Once the first approval check has run,
 that takes about a minute.
@@ -55,7 +60,6 @@ None of these stop the setup, but expect a question about them on the call.
 | Where | What the client sees | Issue |
 |---|---|---|
 | Stages 11–12 | Raw wrangler output, and a migration prompt on a fresh install | #67 |
-| Afterwards | No log file, so the client can't send you what the wizard showed | #83 |
 
 **Re-running the wizard on a live deployment** is safe for the webhook since
 #82. It keeps the existing secret and updates the existing webhook instead of

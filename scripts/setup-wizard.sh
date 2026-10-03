@@ -307,6 +307,50 @@ health_str() {
     });' "$1" 2>/dev/null || printf ''
 }
 
+# ── session log (#83) ─────────────────────────────────────────────────────
+# The screen clears at every stage, so keep a copy of the whole run that the
+# client can look back at or send to their integrator. `script` records the
+# terminal while keeping it a real terminal (colours and prompts still work),
+# and hidden input (API keys) isn't echoed, so it isn't recorded. Afterwards
+# the log is turned into plain text and every key and secret in .dev.vars is
+# replaced with [redacted], in case one was pasted before its prompt appeared.
+
+# clean_log FILE: strip terminal codes, then redact the values of every
+# *KEY* / *SECRET* entry in $ENV_FILE.
+clean_log() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  perl -i -pe 's/\e\[[0-9;?]*[A-Za-z]//g; s/\e\][^\a]*\a//g; s/\e[()][A-Z0-9]//g; s/\r//g; s/[\x04\x08]//g' "$f"
+  if [[ -f "$ENV_FILE" ]]; then
+    local line val
+    while IFS= read -r line; do
+      [[ "$line" =~ ^[A-Z_]*(KEY|SECRET)[A-Z_]*= ]] || continue
+      val="${line#*=}"
+      (( ${#val} >= 6 )) || continue
+      SECRET_VALUE="$val" perl -i -pe 's/\Q$ENV{SECRET_VALUE}\E/[redacted]/g' "$f"
+    done < "$ENV_FILE"
+  fi
+  chmod 600 "$f"
+}
+
+if [[ -z "${WIZARD_LOG:-}" && -t 0 && -t 1 ]] && command -v script >/dev/null 2>&1 && command -v perl >/dev/null 2>&1; then
+  export WIZARD_LOG="$PWD/setup-wizard-$(date +%Y%m%d-%H%M%S).log"
+  # Ctrl-C stops the recorded wizard; this outer shell carries on to clean up.
+  # A no-op handler, not `trap ''`: an ignored signal is inherited, and the
+  # wizard itself would then ignore Ctrl-C.
+  trap ':' INT
+  if script --version >/dev/null 2>&1; then
+    script -q -e -c "$(printf '%q ' bash "$0" "$@")" "$WIZARD_LOG" && rc=0 || rc=$?   # Linux / WSL
+  else
+    script -q "$WIZARD_LOG" bash "$0" "$@" && rc=0 || rc=$?                            # macOS
+  fi
+  trap - INT
+  clean_log "$WIZARD_LOG"
+  printf '\n  %sA copy of this run is in %s - send it to your integrator if anything looked wrong.%s\n\n' \
+    "$DIM" "${WIZARD_LOG#"$PWD"/}" "$RESET"
+  exit "$rc"
+fi
+
 # ── prerequisites (before the banner, so a missing tool fails fast) ───────
 for _c in node npm npx git curl; do
   command -v "$_c" >/dev/null 2>&1 || { printf 'missing required tool: %s\n' "$_c" >&2; exit 1; }
