@@ -186,7 +186,7 @@ finish() {
 
 
 ENV_FILE=".dev.vars"
-TOTAL_STAGES=12
+TOTAL_STAGES=13
 
 # ── extra helpers (below the marker, wizard-specific) ─────────────────────
 
@@ -334,6 +334,28 @@ if confirm "Does this business pay employees under an award"; then
   note "Connecteam profile. You'll connect it to the sync in the Pay-run settings stage."
 else
   note "Skipped. Each employee's pay rate can come from Connecteam instead (Pay-run settings stage)."
+fi
+
+# ─────────────────────────────────────────────────────────────────────────
+stage "Connecteam custom fields"
+say "The sync reads 27 Connecteam custom fields (TFN, bank, super, tax answers,"
+say "emergency contact...). Any that are missing are created here with the right"
+say "type and dropdown options, so you don't have to build them by hand."
+plan=$(npm run --silent create-fields -- --dry-run) || { printf '%s\n' "$plan" | sed 's/^/  /'; exit 1; }
+printf '%s\n' "$plan" | sed 's/^/  /'
+if printf '%s' "$plan" | grep -q "Nothing to create"; then
+  note "All the fields exist already."
+elif confirm "Create these fields in Connecteam now"; then
+  until npm run --silent create-fields; do
+    warn "Some fields weren't created - the message above says why."
+    confirm "Try again (only the missing ones are created)" || break
+  done
+  step "In Connecteam, open your onboarding pack and add every field ticked [ ] above."
+  note "This step has no API, so it has to be done by hand. A field not in the pack"
+  note "is never asked, so it is always blank."
+  pause "Press Enter once they're all in the pack."
+else
+  warn "Skipped. Employees will get Correction messages for required fields that don't exist."
 fi
 
 # ─────────────────────────────────────────────────────────────────────────

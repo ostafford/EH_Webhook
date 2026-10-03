@@ -27,7 +27,7 @@ account before setup, and as the reference for the wizard's field check.
 | 🔴 | Legal First Name | Text | First name | Legal name for the ATO, not the preferred name |
 | 🔴 | Legal Surname | Text | Surname | Legal name for the ATO |
 | 🔴 | Birthday | Date | Date of birth | Tax and super eligibility |
-| 🟡 | Gender | Dropdown: Male / Female / Other | Gender | `Other` is sent as EH's `Indeterminate` |
+| 🟡 | Gender | Dropdown: Male / Female / Other | Gender | EH only records Male or Female, so `Other` is left blank in EH |
 | 🟡 | *Email* (built into the profile) | — | Email | Payslips; no custom field needed |
 | 🟡 | *Phone number* (built into the profile) | — | Mobile | No custom field needed |
 
@@ -102,7 +102,7 @@ One account only, set to 100% and paid electronically.
 |---|---|
 | Direct manager | Gets a copy of the Correction message on an employee's 3rd failed attempt |
 
-**Total:** 27 custom fields, plus email and phone from the profile.
+**Total:** 28 custom fields (27 plus the award dropdown), plus email and phone from the profile. The wizard creates any of the 27 that are missing (`npm run create-fields`, #55) and the award dropdown in its own stage.
 
 ---
 
@@ -114,7 +114,7 @@ gives each one a result:
 | Result | Meaning | Why it matters | How to fix |
 |---|---|---|---|
 | ✅ **Found** | The field exists, is the right type, and is in the onboarding pack | — | Nothing to do |
-| ❌ **Missing** | No matching field in Connecteam | 🔴 required: every employee gets a Correction message and isn't created in EH. 🟡 recommended: the EH record has a gap | Create the custom field in Connecteam (the wizard can offer to do this, #55), then **add it to the onboarding pack** |
+| ❌ **Missing** | No matching field in Connecteam | 🔴 required: every employee gets a Correction message and isn't created in EH. 🟡 recommended: the EH record has a gap Create it with `npm run create-fields` (the wizard's Connecteam custom fields stage), then **add it to the onboarding pack** |
 | ❌ **Not in the pack** | The field exists but is excluded from the onboarding pack | Employees are never asked for it, so it's always blank | Open the onboarding pack's settings in Connecteam and include the field |
 | ⚠️ **Wrong type** | E.g. Birthday is a text field instead of a date | The value can't be converted, so the sync rejects it | Connecteam can't change a field's type, only rename or delete it. Create a new field of the right type, include it in the pack, and delete or rename the old one |
 | ⚠️ **Dropdown options don't match** | E.g. Employee Status has `Full time` instead of `FullTime` | EH rejects anything it doesn't recognise | Rename the options to the exact values above, or map them in the field map |
@@ -123,13 +123,13 @@ gives each one a result:
 
 ---
 
-## 🎓 Award setup (planned wizard stage)
+## 🎓 Award setup (wizard stage)
 
 Connecteam has no idea awards exist; EH does. The integration bridges this:
 
 1. **The client installs their award(s) in EH.** This is a payroll decision, so it stays manual.
 2. **The wizard checks** that EH has at least one award classification, and stops with a clear message if there are none.
-3. **The wizard imports every classification** into a Connecteam admin-only dropdown (`npm run provision-classification-field`).
+3. **The wizard imports every classification** into a Connecteam admin-only dropdown (`npm run provision-classification-field`), and the Pay-run settings stage maps it.
 4. **Admins pick each employee's classification** in Connecteam. The integration never chooses one.
 
 **When an award changes in EH** (a new award, or an award review), re-run the
@@ -137,5 +137,5 @@ import. It only adds new classifications and never changes an employee's
 existing selection:
 
 ```
-npm run provision-classification-field -- --business <EH business ID> --field-id <award field ID>
+npm run provision-classification-field
 ```

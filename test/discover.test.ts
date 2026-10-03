@@ -101,6 +101,18 @@ describe("buildFieldMapDraft", () => {
     expect(unmapped.map((u) => u.id)).toEqual([20]);
   });
 
+  it("drafts the demo account's committed field map, apart from pay settings and the award (#62 part 3)", async () => {
+    const { DEMO_CUSTOM_FIELDS } = await import("./fixtures/demo-custom-fields.js");
+    const committed = (await import("../clients/self/field-map.json", { with: { type: "json" } })).default as any;
+    const { draft } = buildFieldMapDraft({ ...base, fields: DEMO_CUSTOM_FIELDS });
+
+    const byEh = (fields: any[]) =>
+      Object.fromEntries(fields.filter((r) => r.eh !== "payRateTemplate").map((r) => [r.eh, r]));
+    expect(byEh(draft.fields)).toEqual(byEh(committed.fields));
+    expect(draft.rules.taxDeclaration).toEqual(committed.rules.taxDeclaration);
+    expect(draft.rules.super).toEqual(committed.rules.super);
+  });
+
   it("lists unrecognised fields for review", () => {
     const { unmapped } = buildFieldMapDraft({
       ...base,

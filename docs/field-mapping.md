@@ -35,7 +35,7 @@ fills them in but nothing reads them.
 | Legal First Name | 42920713 | `firstName` | legal name (ATO). Connecteam top-level `firstName` = preferred, **not synced v1** |
 | Legal Surname | 42920714 | `surname` | |
 | Birthday | 25145118 | `dateOfBirth` | DD/MM/YYYY → ISO |
-| Gender | 25145119 | `gender` | Male/Female → EH enum; Other → verify EH value (`Indeterminate`/null) |
+| Gender | 25145119 | `gender` | Male/Female → EH enum; Other → `Indeterminate`, which EH stores as **blank** (see below) |
 | `email` (top-level) | — | `emailAddress` | |
 | `phoneNumber` (top-level) | — | `mobilePhone` | already E.164 (`+61…`) |
 | Street Address | 25145120 | `residentialStreetAddress` | `.address` up to first comma; fragile — candidate for a dedicated "line 1" field |
@@ -84,6 +84,20 @@ fills them in but nothing reads them.
 - Field name corrections applied: `mobilePhone` (not `mobileNumber`), `residentialPostCode` (capital C), `superFund1_ProductCode` (not `_USI`), `helpDebt`+`stslDebt` (not `hasHelpDebt`), no `isNonResident` field.
 - **A bad TFN is accepted (200)** and the record stays `Incomplete` — never a 400.
 - EH has no `isPostalAddressSameAsResidential`; omitting postal fields is fine.
+
+## Gender (issue #55, probed 2026-10-03)
+
+Throwaway employees created on the unstructured endpoint, read back, deleted:
+
+| Sent `gender` | Create | Stored |
+|---|---|---|
+| `Male` / `Female` | 201 | `Male` / `Female` |
+| `Indeterminate`, `X`, `Other`, `I`, `Unknown`, nonsense | 201 | `null` |
+
+EH's API keeps only `Male` and `Female`; anything else is accepted and silently
+left blank, with no error. So "Other" reaches EH as no gender recorded. The map
+keeps `Other → Indeterminate` because the sync rejects a dropdown option the map
+doesn't list (it would send the employee a Correction message).
 
 ## Verified against the live Connecteam Onboarding API (issue #7, 2026-08-31)
 

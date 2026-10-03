@@ -1,57 +1,15 @@
 /**
  * Builds discover's DRAFT field map from Connecteam custom-field definitions,
- * matching each by name against the known Connecteam-name -> EH-field rules
- * (from docs/field-mapping.md).
+ * matching each by name against the shared field spec (./field-spec.ts).
  */
 import type { CustomFieldDefinition } from "./connecteam-custom-fields.js";
+import { FIELD_SPEC, type Target } from "./field-spec.js";
 
-interface Known {
-  match: RegExp;
-  eh: string;
-  transform: string;
-  required?: boolean;
-  sensitive?: boolean;
-  map?: Record<string, string>;
-}
+type FieldTarget = Extract<Target, { kind: "field" }>;
 
-const KNOWN: Known[] = [
-  { match: /legal first name/i, eh: "firstName", transform: "trimString", required: true },
-  { match: /legal surname/i, eh: "surname", transform: "trimString", required: true },
-  { match: /birthday|date of birth/i, eh: "dateOfBirth", transform: "dateDmyToIso", required: true },
-  { match: /^gender/i, eh: "gender", transform: "dropdownValue", map: { Male: "Male", Female: "Female", Other: "Indeterminate" } },
-  { match: /street address/i, eh: "residentialStreetAddress", transform: "locationStreetLine" },
-  { match: /suburb/i, eh: "residentialSuburb", transform: "trimString" },
-  { match: /^state/i, eh: "residentialState", transform: "dropdownValue" },
-  { match: /postcode|post code/i, eh: "residentialPostCode", transform: "zeroPad4" },
-  { match: /country/i, eh: "residentialCountry", transform: "locationFull", map: { Australia: "AU" } },
-  { match: /emergency contact name/i, eh: "emergencyContact1_Name", transform: "trimString" },
-  { match: /emergency contact (number|phone)/i, eh: "emergencyContact1_ContactNumber", transform: "trimString" },
-  { match: /emergency contact relationship/i, eh: "emergencyContact1_Relationship", transform: "trimString" },
-  { match: /employment start date|start date/i, eh: "startDate", transform: "dateDmyToIso", required: true },
-  { match: /^title/i, eh: "jobTitle", transform: "trimString" },
-  { match: /employee status/i, eh: "employmentType", transform: "dropdownValue", map: { FullTime: "FullTime", PartTime: "PartTime", Casual: "Casual", LabourHire: "LabourHire" } },
-  { match: /^tfn|tax file number/i, eh: "taxFileNumber", transform: "digits", required: true, sensitive: true },
-  { match: /name on bank account/i, eh: "bankAccount1_AccountName", transform: "trimString", sensitive: true },
-  { match: /^bsb/i, eh: "bankAccount1_BSB", transform: "zeroPad6", sensitive: true },
-  { match: /account number/i, eh: "bankAccount1_AccountNumber", transform: "digits", sensitive: true },
-  // Optional, per issue #42 - only used when the client also sets
-  // employmentHero.perEmployeeRate. Harmless if the field doesn't exist.
-  { match: /standard hours.*week|hours per week|weekly hours/i, eh: "hoursPerWeek", transform: "number" },
-];
-
-const TAX_DECLARATION: Array<{ match: RegExp; key: string }> = [
-  { match: /tax-?free threshold/i, key: "claimTaxFreeThreshold" },
-  { match: /australian resident/i, key: "australianResident" },
-  { match: /help.*debt|stsl|study.*debt/i, key: "hasHelpOrStslDebt" },
-];
-
-const SUPER: Array<{ match: RegExp; key: string }> = [
-  // Whole word only - a bare /usi/ also matches "Business".
-  { match: /\busi\b|unique superannuation identifier/i, key: "usiField" },
-  { match: /super.*abn/i, key: "abnField" },
-  { match: /super fund name/i, key: "fundNameField" },
-  { match: /member number/i, key: "memberNumberField" },
-];
+const KNOWN = FIELD_SPEC.flatMap((s) => (s.target.kind === "field" ? [{ match: s.match, ...s.target }] : []));
+const TAX_DECLARATION = FIELD_SPEC.flatMap((s) => (s.target.kind === "taxDeclaration" ? [{ match: s.match, key: s.target.key }] : []));
+const SUPER = FIELD_SPEC.flatMap((s) => (s.target.kind === "super" ? [{ match: s.match, key: s.target.key }] : []));
 
 export interface DraftInput {
   client: string;
@@ -99,9 +57,11 @@ export function buildFieldMapDraft(input: DraftInput): DraftResult {
     }
     usedEh.add(k.eh);
     const rule: DraftResult["draft"]["fields"][number] = { eh: k.eh, from: { customFieldId: f.customFieldId }, transform: k.transform };
-    if (k.required) rule.required = true;
-    if (k.sensitive) rule.sensitive = true;
-    if (k.map) rule.map = k.map;
+    const t: FieldTarget = k;
+    if (t.required) rule.required = true;
+    if (t.sensitive) rule.sensitive = true;
+    if (t.map) rule.map = t.map;
+    if (t.default !== undefined) rule.default = t.default;
     mapped.push(rule);
   }
 
