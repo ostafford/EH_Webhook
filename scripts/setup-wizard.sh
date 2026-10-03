@@ -337,26 +337,37 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────
-stage "Connecteam custom fields"
+stage "Connecteam field check"
 say "The sync reads 27 Connecteam custom fields (TFN, bank, super, tax answers,"
-say "emergency contact...). Any that are missing are created here with the right"
-say "type and dropdown options, so you don't have to build them by hand."
+say "emergency contact...) plus the award dropdown. This checks each one exists,"
+say "is the right type and has the right dropdown options, and says how to fix"
+say "anything that isn't."
+field_check() { npm run --silent field-check && fc_rc=0 || fc_rc=$?; [[ $fc_rc -ne 1 ]] || exit 1; }
+field_check
 plan=$(npm run --silent create-fields -- --dry-run) || { printf '%s\n' "$plan" | sed 's/^/  /'; exit 1; }
-printf '%s\n' "$plan" | sed 's/^/  /'
-if printf '%s' "$plan" | grep -q "Nothing to create"; then
-  note "All the fields exist already."
-elif confirm "Create these fields in Connecteam now"; then
-  until npm run --silent create-fields; do
-    warn "Some fields weren't created - the message above says why."
-    confirm "Try again (only the missing ones are created)" || break
-  done
-  step "In Connecteam, open your onboarding pack and add every field ticked [ ] above."
-  note "This step has no API, so it has to be done by hand. A field not in the pack"
-  note "is never asked, so it is always blank."
-  pause "Press Enter once they're all in the pack."
-else
-  warn "Skipped. Employees will get Correction messages for required fields that don't exist."
+if ! printf '%s' "$plan" | grep -q "Nothing to create"; then
+  say ""
+  printf '%s\n' "$plan" | sed 's/^/  /'
+  if confirm "Create the missing fields in Connecteam now"; then
+    until npm run --silent create-fields; do
+      warn "Some fields weren't created - the message above says why."
+      confirm "Try again (only the missing ones are created)" || break
+    done
+    step "In Connecteam, open your onboarding pack and add every field ticked [ ] above."
+    note "This step has no API, so it has to be done by hand."
+    pause "Press Enter once they're all in the pack, to re-check."
+    field_check
+  fi
 fi
+while [[ $fc_rc -eq 2 ]]; do
+  warn "A required field is missing or the wrong type (marked above). The sync can't"
+  warn "create employees in Employment Hero until it's fixed."
+  pause "Fix it in Connecteam, then press Enter to re-check (Ctrl-C to stop)."
+  field_check
+done
+note "Can't be checked automatically: that every field is in the onboarding pack."
+note "A field that isn't in the pack is never asked, so it is always blank."
+pause "Press Enter when you've confirmed the pack includes them."
 
 # ─────────────────────────────────────────────────────────────────────────
 stage "Discover the field map + structural IDs"

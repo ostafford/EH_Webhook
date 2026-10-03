@@ -133,13 +133,17 @@ Connecteam when the webhook is registered (step 5). → **`CT_WEBHOOK_SECRET`**
 
 ### 2f. Custom fields
 The sync reads 27 custom fields (`docs/connecteam-field-checklist.md`; the award
-dropdown is §3). The wizard creates any that are missing, with the right type,
-dropdown options and permissions:
+dropdown is §3). The wizard checks them, then creates any that are missing,
+with the right type, dropdown options and permissions:
 
 ```bash
+npm run field-check                  # every field: found / missing / wrong type / options, with fixes
 npm run create-fields -- --dry-run   # list what's missing
 npm run create-fields
 ```
+
+`field-check` exits `2` when a required field is missing or the wrong type; the
+wizard won't continue until it's fixed.
 
 A field the client already has under their own name (e.g. "Tax File Number"
 for "TFN") is matched and left alone, so re-running never duplicates one.

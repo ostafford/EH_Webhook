@@ -37,6 +37,8 @@ export interface FieldSpec {
   ct: {
     type: "str" | "dropdown" | "date" | "birthday" | "location" | "directManager";
     options?: string[];
+    /** Every option must exist (a Yes/No question needs both answers). */
+    allOptionsRequired?: boolean;
     /** Category to create it under, by name; falls back to the account's first. */
     category: string;
     isRequired: boolean;
@@ -122,13 +124,13 @@ export const FIELD_SPEC: FieldSpec[] = [
     ct: { type: "str", ...employee(TAX) },
     target: { kind: "field", eh: "taxFileNumber", transform: "digits", required: true, sensitive: true } },
   { name: "Claim tax-free threshold?", match: /tax-?free threshold/i, group: "Tax", create: true,
-    ct: { type: "dropdown", options: YES_NO, ...employee(TAX, true) },
+    ct: { type: "dropdown", options: YES_NO, allOptionsRequired: true, ...employee(TAX, true) },
     target: { kind: "taxDeclaration", key: "claimTaxFreeThreshold" } },
   { name: "Australian resident for tax purposes?", match: /australian resident/i, group: "Tax", create: true,
-    ct: { type: "dropdown", options: YES_NO, ...employee(TAX, true) },
+    ct: { type: "dropdown", options: YES_NO, allOptionsRequired: true, ...employee(TAX, true) },
     target: { kind: "taxDeclaration", key: "australianResident" } },
   { name: "Have a HELP/STSL study debt?", match: /help.*debt|stsl|study.*debt/i, group: "Tax", create: true,
-    ct: { type: "dropdown", options: YES_NO, ...employee(TAX, true) },
+    ct: { type: "dropdown", options: YES_NO, allOptionsRequired: true, ...employee(TAX, true) },
     target: { kind: "taxDeclaration", key: "hasHelpOrStslDebt" } },
 
   // --- Bank
