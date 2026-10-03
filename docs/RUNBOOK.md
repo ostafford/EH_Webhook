@@ -548,10 +548,13 @@ deduplicated and does nothing).
 > meant to exist there.
 
 ### Replaying a dead-lettered job
-A message on `eh-webhook-dlq` has already raised a System alert. After fixing the
-cause, re-drive it with `wrangler queues`, or re-trigger the source edit in
-Connecteam (edit the profile; first-time pack approval). Nothing auto-retries a
-dead-lettered job.
+A message on `eh-webhook-dlq` has already raised a System alert. Before it got
+there, the sync tried it 6 times over about 15.5 minutes (retries after 30 s,
+1 min, 2 min, 4 min, 8 min; ADR-0007). So the cause outlasted a short blip:
+check Employment Hero and Connecteam status, and the Worker logs for
+`message_send_failed` or the retry reason. After fixing the cause, re-drive it
+with `wrangler queues`, or re-trigger the source edit in Connecteam (edit the
+profile; first-time pack approval). Nothing auto-retries a dead-lettered job.
 
 ### After an award review or a newly installed award
 
