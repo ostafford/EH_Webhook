@@ -505,7 +505,7 @@ if [[ -n "${WORKER_URL:-}" ]]; then
     fi
   else
     reg=$(ct_api_post "/settings/v1/webhooks" "$wh_body")
-    wid=$(printf '%s' "$reg" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).data?.id||"")}catch(e){console.log("")}})')
+    wid=$(printf '%s' "$reg" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(String(JSON.parse(s).data?.id??""))}catch(e){console.log("")}})')
     if [[ -n "$wid" ]]; then
       printf '  %s✓ registered%s webhook id %s\n' "$GREEN" "$RESET" "$wid"
     else
