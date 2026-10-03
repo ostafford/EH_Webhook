@@ -26,7 +26,9 @@ One-way only. Employment Hero is never written back to Connecteam.
 | [`docs/PLAN.md`](./docs/PLAN.md) | Build plan: scope, architecture, milestones, risks |
 | [`docs/field-mapping.md`](./docs/field-mapping.md) | Connecteam field → Employment Hero field, with transforms |
 | [`docs/adr/`](./docs/adr/) | Architecture decision records (the "why" behind key choices) |
-| `docs/RUNBOOK.md` | _(pending)_ How to deploy this for a new client |
+| [`docs/RUNBOOK.md`](./docs/RUNBOOK.md) | How to deploy this for a new client, and day-to-day operations |
+| [`docs/client-setup-walkthrough.md`](./docs/client-setup-walkthrough.md) | The setup call, stage by stage: what the client does, sees, and how long it takes |
+| [`docs/connecteam-field-checklist.md`](./docs/connecteam-field-checklist.md) | Every Connecteam field the sync needs, and how to fix each field-check result |
 
 ## Status
 
