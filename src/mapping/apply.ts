@@ -89,6 +89,11 @@ export interface ApplyOptions {
   /** The employee's Connecteam pay rate, or `null` if none on file. Only read
    * when `employmentHero.perEmployeeRate` is configured. */
   payRate?: PayRateInput | null | undefined;
+  /** The employee's current EH record, or `null` when the write will create
+   * one. Omitted = treat as a create. On an update, a pay-run value from
+   * `defaults` that EH already holds is left out, so a value set by hand in EH
+   * survives (issue #102), and EH's values count when checking the set. */
+  ehRecord?: Record<string, unknown> | null | undefined;
 }
 
 /** Connecteam `rateType` -> EH `rateUnit`. `rateUnit: "Monthly"` confirmed
@@ -223,24 +228,47 @@ function applyFieldRules(user: ConnecteamUser, map: FieldMap): {
  * In the two opt-in modes, if ANY required field cannot be resolved for this
  * employee, every pay-run key is stripped (EH 400s a partial set) and a
  * plain-language issue is returned for the follow-up.
+ *
+ * Against an existing EH record (issue #102): a value EH already holds counts
+ * as resolved, and a value from `defaults` that EH holds is left off the
+ * payload. EH keeps an omitted key on update (probed 2026-10-04,
+ * `docs/eh-pay-defaults.md`), so a value set by hand in EH survives. Values
+ * from the employee's own Connecteam data are always sent.
  */
 function applyPayRun(
   payload: Record<string, PayloadValue>,
   eh: FieldMap["employmentHero"],
   payRate: PayRateInput | null | undefined,
+  ehRecord: Record<string, unknown> | null | undefined,
 ): { complete: boolean; issues: string[]; blocking: boolean } {
   const { defaults } = eh;
+  const fromDefaults = new Set<string>();
+  const ehHas = (k: string): boolean => ehRecord != null && !isBlank(ehRecord[k]);
+  const present = (k: string): boolean => !isBlank(payload[k]) || ehHas(k);
+  // What EH will hold after the write: its own values, overlaid by ours.
+  const after = (): Record<string, PayloadValue> => {
+    const view: Record<string, PayloadValue> = {};
+    for (const k of PAY_RUN_ALL) if (ehHas(k)) view[k] = ehRecord![k] as PayloadValue;
+    return { ...view, ...payload };
+  };
+  const keepEhValues = (): void => {
+    for (const k of fromDefaults) if (ehHas(k)) delete payload[k];
+  };
 
   if (defaults) {
     for (const [key, value] of Object.entries(defaults)) {
-      if (value !== undefined) payload[key] = value as PayloadValue;
+      if (value === undefined) continue;
+      payload[key] = value as PayloadValue;
+      fromDefaults.add(key);
     }
   }
 
   if (!eh.perEmployeeRate && !eh.payRateTemplate) {
     // Pure-defaults mode: complete only if `defaults` carried both axes itself
     // (`payRunComplete` accepts a `defaults.payRateTemplate` as the rate axis).
-    return { complete: payRunComplete(payload), issues: [], blocking: false };
+    const complete = payRunComplete(after());
+    keepEhValues();
+    return { complete, issues: [], blocking: false };
   }
 
   // Kept separate so a per-employee data gap (rate axis) never blocks the
@@ -251,11 +279,15 @@ function applyPayRun(
 
   if (eh.perEmployeeRate) {
     const rate = resolvePerEmployeeRate(payRate);
-    if ("issue" in rate) {
-      rateIssues.push(rate.issue);
-    } else {
+    fromDefaults.delete("rate");
+    fromDefaults.delete("rateUnit");
+    delete payload.rate;
+    delete payload.rateUnit;
+    if (!("issue" in rate)) {
       payload.rate = rate.rate;
       payload.rateUnit = rate.rateUnit;
+    } else if (!(ehHas("rate") && ehHas("rateUnit"))) {
+      rateIssues.push(rate.issue);
     }
   }
 
@@ -264,7 +296,7 @@ function applyPayRun(
     // explicit rate (EH would have to disambiguate via overrideTemplateRate).
     delete payload.rate;
     delete payload.rateUnit;
-    if (isBlank(payload.payRateTemplate)) {
+    if (!present("payRateTemplate")) {
       rateIssues.push(
         "This employee has no pay rate template (award classification) set in " +
           "Connecteam. Set it on their profile, or set the pay rate in " +
@@ -274,7 +306,7 @@ function applyPayRun(
   }
 
   for (const k of PAY_RUN_LOCATION) {
-    if (isBlank(payload[k])) {
+    if (!present(k)) {
       locationIssues.push(
         `Pay-run "${k}" is not configured in the field-map ` +
           `(employmentHero.defaults.${k}) - it is required for every employee ` +
@@ -289,6 +321,7 @@ function applyPayRun(
     for (const k of PAY_RUN_ALL) delete payload[k];
     return { complete: false, issues, blocking: locationIssues.length > 0 };
   }
+  keepEhValues();
   return { complete: true, issues: [], blocking: false };
 }
 
@@ -369,7 +402,7 @@ export function applyFieldMap(
     complete: payRunDefaultsComplete,
     issues: payRunIssues,
     blocking: payRunBlocking,
-  } = applyPayRun(acc.payload, map.employmentHero, opts.payRate);
+  } = applyPayRun(acc.payload, map.employmentHero, opts.payRate, opts.ehRecord);
 
   const externalId = String(user.userId);
   acc.payload.externalId = externalId;

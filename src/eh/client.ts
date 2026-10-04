@@ -68,12 +68,17 @@ export class EhPayrollClient {
    * the existing one. `externalId` is written into the payload so a fresh create
    * is linked from the start. Returns the write envelope - call
    * {@link getByExternalId} afterwards for a field-level read-back.
+   *
+   * Pass `current` (a {@link getByExternalId} result already in hand, `null`
+   * for none) to skip looking the record up again.
    */
   async upsertByExternalId(
     externalId: string,
     payload: EhEmployeePayload,
+    current?: EhEmployee | null,
   ): Promise<EhResult<EhWriteResult>> {
-    const existing = await this.getByExternalId(externalId);
+    const existing: EhResult<EhEmployee | null> =
+      current === undefined ? await this.getByExternalId(externalId) : { outcome: "ok", data: current };
     if (existing.outcome !== "ok") return existing;
 
     const body: EhEmployeePayload = { ...payload, externalId };

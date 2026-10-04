@@ -114,6 +114,10 @@ interface EhStub {
   status?: string;
   detailedStatus?: string | null;
   created?: boolean;
+  /** Fields EH already holds before any write (e.g. a pay schedule set by hand). */
+  current?: Record<string, unknown>;
+  /** Forced result for every getByExternalId call (e.g. EH down). */
+  get?: unknown;
 }
 
 type CtFake = SyncDeps["ct"] & {
@@ -122,7 +126,10 @@ type CtFake = SyncDeps["ct"] & {
   /** Recipient (user id or channel id) -> how many more sends to it fail as `retryable`. */
   failSends: Map<number | string, number>;
 };
-type EhFake = SyncDeps["eh"] & { upserts: Array<{ externalId: string; payload: Record<string, unknown> }> };
+type EhFake = SyncDeps["eh"] & {
+  upserts: Array<{ externalId: string; payload: Record<string, unknown>; current?: unknown }>;
+  gets: number;
+};
 
 function fakeCt(user: ConnecteamUser | null, userOutcome: "ok" | "retryable" | "error" = "ok"): CtFake {
   const dms: Array<{ userId: number; text: string }> = [];
@@ -158,13 +165,15 @@ function fakeCt(user: ConnecteamUser | null, userOutcome: "ok" | "retryable" | "
 }
 
 function fakeEh(stub: EhStub = {}): EhFake {
-  let last: Record<string, unknown> = {};
-  const upserts: Array<{ externalId: string; payload: Record<string, unknown> }> = [];
+  // Like EH: a key left off a write keeps its earlier value.
+  let last: Record<string, unknown> = { ...(stub.current ?? {}) };
+  const upserts: Array<{ externalId: string; payload: Record<string, unknown>; current?: unknown }> = [];
   return {
     upserts,
-    async upsertByExternalId(externalId: string, payload: Record<string, unknown>) {
-      upserts.push({ externalId, payload });
-      last = payload;
+    gets: 0,
+    async upsertByExternalId(externalId: string, payload: Record<string, unknown>, current?: unknown) {
+      upserts.push({ externalId, payload, current });
+      last = { ...last, ...payload };
       if (stub.write) return stub.write;
       return {
         outcome: "ok",
@@ -177,7 +186,9 @@ function fakeEh(stub: EhStub = {}): EhFake {
         },
       };
     },
-    async getByExternalId(externalId: string) {
+    async getByExternalId(this: EhFake, externalId: string) {
+      this.gets++;
+      if (stub.get) return stub.get;
       return {
         outcome: "ok",
         data: {
@@ -1012,6 +1023,48 @@ describe("runSyncJob - per-employee pay rate (issue #42)", () => {
     expect(eh.upserts).toHaveLength(0);
     expect(out.status).toBe("follow_up");
     expect(out.reason).toMatch(/primaryPayCategory/);
+  });
+
+  it("keeps a pay schedule set by hand in EH, and looks the record up only once (#102)", async () => {
+    const ct = mkCt({ outcome: "ok", data: { rateType: "hourly", defaultRate: 40, isDefaultRateEnabled: true } });
+    const eh = fakeEh({ id: 7, current: { id: 7, paySchedule: "Fortnightly" } });
+    const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: rateMap }));
+
+    expect(out.status).toBe("synced");
+    expect(eh.upserts).toHaveLength(1);
+    expect(eh.upserts[0]!.payload).not.toHaveProperty("paySchedule");
+    expect(eh.upserts[0]!.payload.primaryLocation).toBe("Connecteam");
+    expect(eh.upserts[0]!.payload.rate).toBe(40);
+    // The record fetched before the write is handed to the upsert, not fetched again.
+    expect(eh.upserts[0]!.current).toMatchObject({ paySchedule: "Fortnightly" });
+    expect(eh.gets).toBe(2); // the lookup + the read-back
+  });
+
+  it("a default missing from the field map does not block when EH already has it (#102)", async () => {
+    const misconfigured = parseFieldMap({
+      ...fieldMap,
+      employmentHero: {
+        businessId: "555455",
+        defaults: { paySchedule: "Weekly", primaryLocation: "Connecteam" }, // no primaryPayCategory
+        perEmployeeRate: { source: "connecteamPayRate" },
+      },
+    });
+    const ct = mkCt({ outcome: "ok", data: { rateType: "hourly", defaultRate: 40, isDefaultRateEnabled: true } });
+    const eh = fakeEh({ id: 7, current: { primaryPayCategory: "Permanent Ordinary Hours" } });
+
+    const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: misconfigured }));
+
+    expect(out.status).toBe("synced");
+    expect(eh.upserts).toHaveLength(1);
+    expect(ct.channels).toHaveLength(0);
+  });
+
+  it("retries when the EH lookup before the write fails (#102)", async () => {
+    const ct = mkCt({ outcome: "ok", data: { rateType: "hourly", defaultRate: 40, isDefaultRateEnabled: true } });
+    const eh = fakeEh({ get: { outcome: "retryable", status: 503, detail: "down" } });
+    const out = await runSyncJob(job(), deps({ ct, eh, store: fakeGateway(), fieldMap: rateMap }));
+    expect(out.status).toBe("retry");
+    expect(eh.upserts).toHaveLength(0);
   });
 
   it("retries when the pay-rates API is unavailable", async () => {

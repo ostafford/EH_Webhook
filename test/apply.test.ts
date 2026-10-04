@@ -141,6 +141,28 @@ describe("applyFieldMap - employmentHero.perEmployeeRate (issue #42)", () => {
     expect(r.payload.rateUnit).toBe("Hourly");
   });
 
+  it("sends the Connecteam pay rate even when EH has one, but keeps EH's location settings (#102)", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: hourly,
+      ehRecord: { primaryLocation: "Perth", rate: 30, rateUnit: "Hourly" },
+    });
+    expect(r.payload.rate).toBe(35);
+    expect(r.payload.rateUnit).toBe("Hourly");
+    expect(r.payload).not.toHaveProperty("primaryLocation");
+    expect(r.payload.paySchedule).toBe("Weekly");
+  });
+
+  it("no Connecteam pay rate is fine when EH already has a rate (#102)", () => {
+    const r = applyFieldMap(clone(), withRate(), {
+      payRate: null,
+      ehRecord: { rate: 30, rateUnit: "Hourly" },
+    });
+    expect(r.payRunIssues).toEqual([]);
+    expect(r.payload).not.toHaveProperty("rate");
+    expect(r.payload.paySchedule).toBe("Weekly");
+    expect(r.payRunDefaultsComplete).toBe(true);
+  });
+
   it("maps rateType yearly -> Annually", () => {
     const r = applyFieldMap(clone(), withRate(), {
       payRate: { rateType: "yearly", defaultRate: 92000, isDefaultRateEnabled: true },
@@ -352,6 +374,75 @@ describe("applyFieldMap - employmentHero.payRateTemplate (issue #39)", () => {
     expect(r.payload.payRateTemplate).toBeUndefined();
     expect(r.payload.paySchedule).toBeUndefined();
     expect(r.payRunBlocking).toBe(true);
+  });
+
+  describe("against EH's existing record (issue #102)", () => {
+    const L2 = "General Retail Casual L2 21yrs & over";
+    const held = {
+      paySchedule: "Fortnightly", // set by hand in EH
+      primaryLocation: "Perth",
+      primaryPayCategory: "Casual - Ordinary Hours",
+      payRateTemplate: TEMPLATE,
+    };
+
+    it("a create (no EH record) sends the defaults, as before", () => {
+      const r = applyFieldMap(userWith(TEMPLATE), withTemplate(), { ehRecord: null });
+      expect(r.payload.paySchedule).toBe("Weekly");
+      expect(r.payload.primaryLocation).toBe("Connecteam");
+      expect(r.payRunDefaultsComplete).toBe(true);
+    });
+
+    it("leaves out a default EH already has a value for, so a hand-set value survives", () => {
+      const r = applyFieldMap(userWith(TEMPLATE), withTemplate(), { ehRecord: { paySchedule: "Fortnightly" } });
+      expect(r.payload).not.toHaveProperty("paySchedule");
+      // EH is blank for these, so the defaults still fill them
+      expect(r.payload.primaryLocation).toBe("Connecteam");
+      expect(r.payload.primaryPayCategory).toBe("Casual - Ordinary Hours");
+      expect(r.payRunIssues).toEqual([]);
+      expect(r.payRunDefaultsComplete).toBe(true);
+    });
+
+    it("treats a blank EH value as missing and fills it from the default", () => {
+      const r = applyFieldMap(userWith(TEMPLATE), withTemplate(), {
+        ehRecord: { paySchedule: "", primaryLocation: null },
+      });
+      expect(r.payload.paySchedule).toBe("Weekly");
+      expect(r.payload.primaryLocation).toBe("Connecteam");
+    });
+
+    it("always sends the employee's own classification, even when EH has a different one", () => {
+      const r = applyFieldMap(userWith(L2), withTemplate(), { ehRecord: held });
+      expect(r.payload.payRateTemplate).toBe(L2);
+      for (const k of ["paySchedule", "primaryLocation", "primaryPayCategory"]) {
+        expect(r.payload).not.toHaveProperty(k);
+      }
+      expect(r.payRunDefaultsComplete).toBe(true);
+    });
+
+    it("a default missing from the field map is fine when EH already has it", () => {
+      const r = applyFieldMap(userWith(TEMPLATE), withTemplate({ primaryPayCategory: undefined }), {
+        ehRecord: { primaryPayCategory: "Casual - Ordinary Hours" },
+      });
+      expect(r.payRunIssues).toEqual([]);
+      expect(r.payRunBlocking).toBe(false);
+      expect(r.payload.payRateTemplate).toBe(TEMPLATE);
+      expect(r.payload.paySchedule).toBe("Weekly");
+    });
+
+    it("still flags a setting that is blank in both the field map and EH", () => {
+      const r = applyFieldMap(userWith(TEMPLATE), withTemplate({ primaryPayCategory: undefined }), {
+        ehRecord: { paySchedule: "Weekly" },
+      });
+      expect(r.payRunIssues.some((s) => s.includes("primaryPayCategory"))).toBe(true);
+      expect(r.payRunBlocking).toBe(true);
+    });
+
+    it("no classification in Connecteam is fine when EH already has one", () => {
+      const r = applyFieldMap(userWith(undefined), withTemplate(), { ehRecord: held });
+      expect(r.payRunIssues).toEqual([]);
+      expect(r.payload).not.toHaveProperty("payRateTemplate");
+      expect(r.payRunDefaultsComplete).toBe(true);
+    });
   });
 
   it("a company-wide defaults.payRateTemplate satisfies the rate axis on its own", () => {

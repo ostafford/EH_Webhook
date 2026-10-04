@@ -42,6 +42,33 @@ age × permanent/casual, e.g. `General Retail Casual L3 21yrs & over`).
 | `classification:"Level 2"` (bare string) | **silently dropped** — not a recognised key |
 | full set + `payRateTemplate` (award rate) — synthetic employee, no bank details | `status` **stays `Incomplete`** — the award/pay-run axis is satisfied but the basic-details / bank axes are not (see [`eh-complete-criteria.md`](./eh-complete-criteria.md), #45) |
 
+### Updates (issue #102 — probed 2026-10-04)
+
+One employee created with the full set + `payRateTemplate` L3, then updated
+with `PUT .../employee/unstructured/{id}`:
+
+| Sent on the update | Result |
+|---|---|
+| no pay-run keys (name change only) | `200`, every pay-run value **kept** |
+| only `paySchedule` | `200` — no "whole set" error, unlike a create |
+| only `payRateTemplate`, L3 → L2 | `200`, template changed; EH re-derived `rate` (28.89 → 28.45) |
+| EH's own read-back values (incl. the renamed `Casual - Ordinary Hours`) | `200`, accepted unchanged |
+| a blank `paySchedule` (`""`) | `200`, **ignored** — the value stays `Weekly` |
+
+So the all-or-nothing rule applies to a **create**, not to an update of a
+record that already has the set: an update may leave out any pay-run key and EH
+keeps its value. Not probed: a partial update to a record with **no** set yet
+(assume `400`, like a create). The sync never sends one: it fills every blank
+from `defaults` first. Run the update cases with `scripts/probe-eh-pay-defaults.sh`
+(they need `--pay-schedule`, `--location`, `--pay-category` and a rate axis).
+
+**What the sync does with this (#102):** on an update, a value from `defaults`
+that EH already holds is left off the write, so a value set by hand in EH
+survives a profile edit. A value from the employee's own Connecteam data (the
+award template field, or their Connecteam pay rate) is always sent. EH's
+values also count when checking the set, so a setting EH already has is never
+reported as missing.
+
 ### Conclusions
 
 1. **The unstructured endpoint _does_ accept pay-run defaults** — by **name**, and

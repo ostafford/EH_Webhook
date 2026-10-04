@@ -244,6 +244,15 @@ in EH by hand (records stay `Incomplete`). One value applies to every employee
 (per-employee settings: #75). Re-run it any time; Enter keeps the current
 choice.
 
+> **A default only fills a blank (#102).** These settings go on every new
+> employee, and fill any that are blank on an existing one. They never replace
+> a value EH already has. So a payroll admin can change one employee's pay
+> schedule or location by hand in EH, and it stays changed after their next
+> profile edit. It also means that changing a default here does **not** move
+> existing employees. Change those in EH. The award classification and a
+> Connecteam pay rate are different: they come from each employee's own
+> Connecteam profile, and sync on every edit.
+
 **Check the map while you tune it:**
 
 ```bash

@@ -129,6 +129,53 @@ probe "pay-run defaults by name (full set)" \
 probe "dead keys (classification / standardHoursPerWeek / payRateTemplateId / awardId alone) - expect all dropped" \
   '{"classification":"Level 2","standardHoursPerWeek":40,"payRateTemplateId":0,"awardId":1}'
 
+# 4. updates (issue #102): create one employee with the full set, then PUT
+#    partial pay-run sets and read back what EH kept. Needs --pay-schedule,
+#    --location, --pay-category and --pay-rate-template (or --rate + --rate-unit).
+probe_updates() {
+  local ext="ZZZTEST-$(date +%s)-$RANDOM" emp code
+  local basejson='{"firstName":"Zztest","surname":"Probe","startDate":"2020-01-01","employmentType":"Casual","taxFileNumber":"123456782"}'
+  # $1 = extra JSON; prints the full body with externalId and the base fields.
+  body() { node -e 'process.stdout.write(JSON.stringify({...JSON.parse(process.argv[1]), ...JSON.parse(process.argv[2]), externalId: process.argv[3]}))' "$basejson" "$1" "$ext"; }
+  readback() {
+    curl -sS "${H[@]}" "$B/employee/unstructured/externalid/$ext" | node -e '
+      const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      const keys = ["paySchedule","primaryLocation","primaryPayCategory","payRateTemplate","rate","rateUnit"];
+      console.log("   after :", JSON.stringify(Object.fromEntries(keys.map((k) => [k, r[k]]))));'
+  }
+  local full
+  full=$(PAY_SCHEDULE="$PAY_SCHEDULE" LOCATION="$LOCATION" PAY_CATEGORY="$PAY_CATEGORY" RATE="$RATE" \
+    RATE_UNIT="$RATE_UNIT" PAY_RATE_TEMPLATE="$PAY_RATE_TEMPLATE" node -e '
+    const e = process.env, o = { paySchedule: e.PAY_SCHEDULE, primaryLocation: e.LOCATION, primaryPayCategory: e.PAY_CATEGORY };
+    if (e.PAY_RATE_TEMPLATE) o.payRateTemplate = e.PAY_RATE_TEMPLATE; else Object.assign(o, { rate: Number(e.RATE), rateUnit: e.RATE_UNIT });
+    process.stdout.write(JSON.stringify(o));')
+  code=$(curl -sS -o /tmp/probe_cr -w '%{http_code}' -X POST "$B/employee/unstructured" "${H[@]}" -d "$(body "$full")")
+  echo "── updates: create with the full set: HTTP $code"
+  emp=$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync("/tmp/probe_cr","utf8")).id||""))}catch(e){}')
+  [[ -n "$emp" ]] || { echo "   error : $(cat /tmp/probe_cr)"; echo; return; }
+  readback
+  local label extra
+  while IFS='|' read -r label extra; do
+    code=$(curl -sS -o /tmp/probe_up -w '%{http_code}' -X PUT "$B/employee/unstructured/$emp" "${H[@]}" -d "$(body "$extra")")
+    echo "── update: $label"
+    echo "   sent  : $extra"
+    echo "   PUT   : HTTP $code$([[ $code -ge 400 ]] && printf '  %s' "$(cat /tmp/probe_up)")"
+    readback
+  done <<EOU
+no pay-run keys (name change only)|{"firstName":"Zztest1"}
+only paySchedule|{"paySchedule":"$PAY_SCHEDULE"}
+a blank paySchedule|{"paySchedule":""}
+EOU
+  curl -sS -o /dev/null -X DELETE "$B/employee/$emp" -H "authorization: $AUTH"
+  echo
+}
+if [[ -n "$PAY_SCHEDULE" && -n "$LOCATION" && -n "$PAY_CATEGORY" && ( -n "$PAY_RATE_TEMPLATE" || ( -n "$RATE" && -n "$RATE_UNIT" ) ) ]]; then
+  probe_updates
+else
+  echo "── updates: skipped (pass --pay-schedule, --location, --pay-category and a rate axis)"
+  echo
+fi
+
 cat <<'EON'
 Read the result:
   - "legacy" keeping paySchedule/primaryLocation null == confirms why #34
@@ -136,5 +183,7 @@ Read the result:
   - the "by name" probe keeping all fields AND status improving == put that set
     in field-map employmentHero.defaults.
   - "rejected names" keeping nothing == those keys are dead; don't use them.
+  - "updates" keeping every value on each 200 == an update may leave out
+    pay-run keys EH already holds (issue #102).
 Record the outcome in docs/eh-pay-defaults.md.
 EON
