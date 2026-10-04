@@ -6,7 +6,7 @@
  * sends at least the "all clear" message, even for an empty/ready-only roster).
  */
 import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import worker from "../../src/index.js";
 import { SyncStore } from "../../src/db/store.js";
 
@@ -76,5 +76,40 @@ describe("POST /status/digest auth (in workerd)", () => {
   it("rejects a wrong bearer token", async () => {
     const { status } = await call("/status/digest", { method: "POST", headers: { authorization: "Bearer nope" } });
     expect(status).toBe(401);
+  });
+});
+
+describe("POST /status/digest result (in workerd, Connecteam stubbed; issue #94)", () => {
+  const realFetch = globalThis.fetch;
+  const auth = { method: "POST", headers: { authorization: `Bearer ${SECRET}` } };
+  // An empty roster sends exactly one "all clear" channel message. Every other
+  // outbound call throws, so this test can never reach a real account.
+  const stubChannelSend = (status: number) => {
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("/chat/v1/conversations/")) {
+        return new Response(JSON.stringify({ requestId: "r", data: {} }), {
+          status,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected outbound fetch: ${String(url)}`);
+    }) as typeof fetch;
+  };
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("answers 200 sent when every message went out", async () => {
+    stubChannelSend(200);
+    const { status, body } = await call("/status/digest", auth);
+    expect(status).toBe(200);
+    expect(body).toEqual({ status: "sent", messages: 1 });
+  });
+
+  it("answers 502 failed when a send fails, instead of claiming it was sent", async () => {
+    stubChannelSend(503);
+    const { status, body } = await call("/status/digest", auth);
+    expect(status).toBe(502);
+    expect(body).toEqual({ status: "failed", sent: 0, messages: 1 });
   });
 });

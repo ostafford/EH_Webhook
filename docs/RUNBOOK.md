@@ -502,7 +502,13 @@ automatically (`STATUS_DIGEST_DAY`, default Monday, UTC) and on demand:
 curl -X POST -H "Authorization: Bearer $STATUS_TOKEN" https://<worker>.workers.dev/status/digest
 ```
 
-Silent but for a one-line "all clear" when everyone is `ready`.
+Silent but for a one-line "all clear" when everyone is `ready`. The on-demand
+call answers `{"status":"sent","messages":N}`, or **502**
+`{"status":"failed","sent":n,"messages":N}` if Connecteam didn't take a
+message. Sending stops at the first failure, so nothing arrives with a gap;
+re-run it once Connecteam is back. A failed weekly digest retries every 30
+minutes for the rest of the digest day (UTC). The Worker logs
+`message_send_failed` for each failure.
 
 ### The three message types — who acts
 

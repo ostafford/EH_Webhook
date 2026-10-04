@@ -63,12 +63,16 @@ app.get("/status", async (c) => {
 /** On-demand version of the weekly status digest the admin channel gets automatically. */
 app.post("/status/digest", async (c) => {
   if (!checkStatusAuth(c)) return c.json({ error: "unauthorized" }, 401);
-  await runStatusDigestNow({
+  const result = await runStatusDigestNow({
     store: new SyncStore(c.env.DB),
     ct: buildCt(c.env),
     adminChannelId: c.env.ADMIN_CONNECTEAM_CHANNEL_ID,
   });
-  return c.json({ status: "sent" });
+  // 502: Connecteam, upstream of us, didn't take a message (issue #94).
+  if (result.outcome === "failed") {
+    return c.json({ status: "failed", sent: result.sent, messages: result.messages }, 502);
+  }
+  return c.json({ status: "sent", messages: result.messages });
 });
 
 /**
@@ -202,7 +206,7 @@ async function maybeRunStatusDigest(
     adminChannelId: env.ADMIN_CONNECTEAM_CHANNEL_ID,
     ...(env.STATUS_DIGEST_DAY !== undefined ? { digestDay: env.STATUS_DIGEST_DAY } : {}),
   });
-  if (result === "sent") logEvent({ evt: "status_digest", result });
+  if (result !== "skipped") logEvent({ evt: "status_digest", result });
 }
 
 export default {
