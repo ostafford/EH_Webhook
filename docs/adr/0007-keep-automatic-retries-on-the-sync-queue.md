@@ -99,14 +99,23 @@ would have succeeded.
   cycle bump leaves the count one short (the message did go out). Both need an
   eviction in a window of milliseconds; a send that *reports* failure, the
   common case, is covered above.
-- **The retry delay bounds the claim windows.** A retried message must arrive
-  while its claims are still held (Correction: 1 h). The total retry window
-  must stay well under that, or a late retry could re-send a message. See #90.
-- **No retry delay is configured** (`retry_delay` on the consumer, or a delay on
-  `message.retry()`). The five retries can therefore be used up quickly during
-  an Employment Hero outage of a few minutes, sending the job to the
-  dead-letter queue sooner than needed. Tracked in #90: set a delay so the
-  retries span a realistic outage.
+- **Retries back off, and the total window is known (#90).** With no delay,
+  Cloudflare redelivers a retried message in the next batch, so the five
+  retries could be spent within seconds. `dispatchBatch` now retries with
+  `message.retry({ delaySeconds })` from `retryDelaySeconds(attempts)`:
+  30 s, 60 s, 2 min, 4 min, 8 min (doubling, capped at 8 min). The sixth and
+  last delivery runs about **15.5 minutes** after the first. A job that is
+  still failing then dead-letters. That covers a 5-minute Employment Hero or
+  Connecteam outage with room to spare. The delay is set in code, not as
+  `retry_delay` in `wrangler.jsonc`, so the live deploy folder's file is
+  untouched.
+- **The retry window must stay inside the claim windows.** A retried message
+  must arrive while its claims are still held, or a late retry could re-send
+  a message. The shortest is 1 h (Correction, Collision, System alert), so
+  15.5 min leaves a wide margin. `test/sync-consumer.test.ts` reads
+  `max_retries` from `wrangler.jsonc` and fails if the window passes half of
+  the Correction claim or drops below 5 minutes. If you raise `max_retries`,
+  that test tells you whether the backoff still fits.
 - **The playbook rule still holds as the default** for other integrations under
   `../` (e.g. a write-per-record importer with no upsert key). This ADR is the
   record of why this consumer is the exception. A client's IT person asking

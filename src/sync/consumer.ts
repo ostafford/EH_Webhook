@@ -10,7 +10,8 @@
  * throws for an expected retryable fault - it returns `status: "retry"` and lets
  * the queue handler call `message.retry()`.
  *
- * The queue retries a job up to 5 times, re-running it from the start. That is
+ * The queue retries a job up to 5 times, with a growing delay
+ * ({@link retryDelaySeconds}), re-running it from the start. That is
  * only safe because every side effect below is idempotent (the EH upsert, the
  * link) or claimed before it happens (each message). A new side effect must be
  * one or the other - see docs/adr/0007. Every send's result is checked: a
@@ -326,8 +327,26 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
 /** Minimal shape of a queue message / batch, so batch routing is runtime-agnostic. */
 export interface QueueMessageLike<B> {
   body: B;
+  /** Delivery number, starting at 1 (Cloudflare's `Message.attempts`). */
+  attempts: number;
   ack(): void;
-  retry(): void;
+  retry(options?: { delaySeconds?: number }): void;
+}
+
+const RETRY_BASE_DELAY_SECONDS = 30;
+const RETRY_MAX_DELAY_SECONDS = 8 * 60;
+
+/**
+ * How long to wait before redelivering a job whose delivery number `attempts`
+ * just failed (issue #90). With no delay, Cloudflare redelivers a retry in the
+ * next batch, so all 5 retries could be spent within seconds of a blip.
+ * Doubling from 30 s (30, 60, 120, 240, 480) puts the last delivery ~15.5 min
+ * after the first: long enough to ride out a short outage, and well inside
+ * the 1 h Correction claim, so a late retry can't re-send a message
+ * (ADR-0007). `test/sync-consumer.test.ts` checks both against `max_retries`.
+ */
+export function retryDelaySeconds(attempts: number): number {
+  return Math.min(RETRY_BASE_DELAY_SECONDS * 2 ** Math.max(0, attempts - 1), RETRY_MAX_DELAY_SECONDS);
 }
 export interface QueueBatchLike<B> {
   queue: string;
@@ -385,13 +404,13 @@ export async function dispatchBatch(
   for (const message of newestPerUser.values()) {
     try {
       const outcome = await runSyncJob(message.body, deps);
-      if (outcome.status === "retry") message.retry();
+      if (outcome.status === "retry") message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
       else {
         message.ack();
         acked++;
       }
     } catch {
-      message.retry();
+      message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
     }
   }
   await bump(deps, "acked_total", acked);

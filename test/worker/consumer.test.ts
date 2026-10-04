@@ -4,12 +4,12 @@ import {
   createMessageBatch,
   getQueueResult,
 } from "cloudflare:test";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { loadFieldMap } from "../../src/mapping/loader.js";
 import { EhPayrollClient } from "../../src/eh/client.js";
 import { ConnecteamClient } from "../../src/connecteam/client.js";
 import { SyncStore } from "../../src/db/store.js";
-import { runSyncJob, dispatchBatch, type SyncDeps } from "../../src/sync/consumer.js";
+import { runSyncJob, dispatchBatch, retryDelaySeconds, type SyncDeps } from "../../src/sync/consumer.js";
 import type { SyncJob } from "../../src/sync/job.js";
 import { syntheticUser } from "../fixtures/connecteam-user.js";
 
@@ -24,6 +24,8 @@ interface WorldOpts {
   ehValidationMessage?: string;
   ehStatus?: string;
   ehDetailedStatus?: string | null;
+  /** Connecteam's user lookup answers 503, so the job asks for a retry. */
+  ctDown?: boolean;
 }
 
 /** A tiny in-memory Employment Hero + Connecteam, driven through the real clients. */
@@ -64,6 +66,7 @@ function world(opts: WorldOpts = {}) {
 
     // --- Connecteam ---
     if (u.includes("/users/v1/users")) {
+      if (opts.ctDown) return json(503, { message: "unavailable" });
       return json(200, { requestId: "r", data: { users: ctUser ? [ctUser] : [] } });
     }
     if (method === "POST" && u.includes("/chat/v1/conversations/privateMessage/")) {
@@ -95,7 +98,7 @@ const job = (over: Partial<SyncJob> = {}): SyncJob => ({
   ...over,
 });
 
-const qMsg = (body: SyncJob, id = "m1") => ({ id, timestamp: new Date(), attempts: 1, body });
+const qMsg = (body: SyncJob, id = "m1", attempts = 1) => ({ id, timestamp: new Date(), attempts, body });
 
 beforeEach(async () => {
   await env.DB.batch([
@@ -236,6 +239,22 @@ describe("queue consumer (in workerd, real D1)", () => {
     await dispatchBatch(batch, good.deps, DLQ);
     const res = await getQueueResult(batch, ctx);
     expect(res.explicitAcks).toContain("ok-1");
+  });
+
+  it("retries an outage with a backoff delay through a real MessageBatch (issue #90)", async () => {
+    const w = world({ ctDown: true });
+    const batch = createMessageBatch("eh-webhook-sync", [qMsg(job(), "down-1", 4)]);
+    const ctx = createExecutionContext();
+    // The pool's test MessageBatch drops retry() options from its result
+    // (vitest-pool-workers 0.22), so read the delay off the call itself.
+    const retry = vi.spyOn(batch.messages[0]!, "retry");
+
+    await dispatchBatch(batch, w.deps, DLQ);
+    const res = await getQueueResult(batch, ctx);
+
+    expect(res.explicitAcks).not.toContain("down-1");
+    expect(res.retryMessages.map((m) => m.msgId)).toEqual(["down-1"]);
+    expect(retry).toHaveBeenCalledWith({ delaySeconds: retryDelaySeconds(4) });
   });
 
   it("dead-letter batch posts a System alert to the admin channel and acks", async () => {
