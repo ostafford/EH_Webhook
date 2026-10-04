@@ -15,7 +15,7 @@ import type { EhFieldError } from "../eh/errors.js";
 const MAX_LEN = 500;
 
 export const GENERIC_CORRECTION =
-  "Some of the details you entered couldn't be saved to payroll. Please review your personal, address, bank, tax and super details in Connecteam and correct anything that looks wrong.";
+  "Some of the details you entered couldn't be saved to Employment Hero. Please review your personal, address, bank, tax and super details in Connecteam and correct anything that looks wrong.";
 
 interface CuratedLine {
   match: RegExp;
@@ -73,7 +73,7 @@ function friendlyLines(fields: EhFieldError[]): string[] {
 /** Correction message -> the employee who entered the bad data. */
 export function correctionMessage(fields: EhFieldError[]): string {
   const body = [
-    "Hi - a few of the details you entered for payroll need a quick fix:",
+    "Hi - a few of the details you entered need a quick fix before they can be saved to Employment Hero:",
     ...friendlyLines(fields).map((l) => `- ${l}`),
     "Update them in Connecteam and we'll sync again automatically.",
   ].join("\n");
@@ -101,10 +101,10 @@ export function personLabel(ref: PersonRef): string {
 export function managerEscalationMessage(fields: EhFieldError[], ref?: PersonRef): string {
   const who = ref ? ` (${personLabel(ref)})` : "";
   const body = [
-    `Heads up: an employee you manage${who} has had their payroll details fail to sync three times in a row.`,
+    `Heads up: an employee you manage${who} has had their details fail to sync to Employment Hero three times in a row.`,
     "They've been asked to correct:",
     ...friendlyLines(fields).map((l) => `- ${l}`),
-    "Please check in with them so payroll can be completed.",
+    "Please check in with them so their Employment Hero record can be completed.",
   ].join("\n");
   return clamp(body);
 }
@@ -114,7 +114,7 @@ export function followUpNoticeMessage(reasons: string[], ref: PersonRef): string
   const items =
     reasons.length > 0 ? reasons : ["A payroll admin needs to review this record in Employment Hero."];
   const body = [
-    `Payroll follow-up needed for ${personLabel(ref)}:`,
+    `Employment Hero follow-up needed for ${personLabel(ref)}:`,
     ...items.map((r) => `- ${r}`),
     "The sync completed with safe defaults - finish this by hand in Employment Hero.",
   ].join("\n");
@@ -129,7 +129,7 @@ export function resolvedNoticeMessage(ref: PersonRef, status: string): string {
 /** System alert -> the admin channel, when a queue message dead-letters. */
 export function systemAlertMessage(detail: string, ref: PersonRef): string {
   const body = [
-    `Payroll sync failed for ${personLabel(ref)} and could not be retried.`,
+    `Employment Hero sync failed for ${personLabel(ref)} and could not be retried.`,
     detail.trim() ? `Detail: ${detail.trim()}` : "No further detail was returned.",
     "No employee action is possible - check the Employment Hero API status and credentials.",
   ].join("\n");
@@ -146,7 +146,7 @@ export function systemAlertMessage(detail: string, ref: PersonRef): string {
  */
 export function collisionAlertMessage(ehEmployeeId: string, ref: PersonRef, otherCtUserId: number): string {
   const body = [
-    `Payroll sync for ${personLabel(ref)} landed on Employment Hero employee ${ehEmployeeId}, which is already linked to a different Connecteam user (id ${otherCtUserId}).`,
+    `The sync for ${personLabel(ref)} landed on Employment Hero employee ${ehEmployeeId}, which is already linked to a different Connecteam user (id ${otherCtUserId}).`,
     "Employment Hero likely matched them by a duplicate value (e.g. the same Tax File Number) instead of creating a separate record.",
     "No employee action is possible - a payroll admin must check and separate these two records directly in Employment Hero.",
   ].join("\n");
