@@ -66,7 +66,7 @@ describe("correctionMessage", () => {
     ]);
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
-      "Hi - a few of the details you entered for payroll need a quick fix:
+      "Hi - a few of the details you entered need a quick fix before they can be saved to Employment Hero:
       - Your bank BSB doesn't look right - check it's the 6-digit branch number for your account and re-enter it in Connecteam.
       - Your Tax File Number doesn't appear to be valid - re-check the 9 digits and re-enter it in Connecteam.
       Update them in Connecteam and we'll sync again automatically."
@@ -93,10 +93,10 @@ describe("managerEscalationMessage", () => {
     const msg = managerEscalationMessage([{ field: "taxFileNumber", reason: "invalid" }]);
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
-      "Heads up: an employee you manage has had their payroll details fail to sync three times in a row.
+      "Heads up: an employee you manage has had their details fail to sync to Employment Hero three times in a row.
       They've been asked to correct:
       - Your Tax File Number doesn't appear to be valid - re-check the 9 digits and re-enter it in Connecteam.
-      Please check in with them so payroll can be completed."
+      Please check in with them so their Employment Hero record can be completed."
     `);
   });
 });
@@ -113,7 +113,7 @@ describe("followUpNoticeMessage", () => {
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toContain("17760356");
     expect(msg).toMatchInlineSnapshot(`
-      "Payroll follow-up needed for Connecteam user 17760356:
+      "Employment Hero follow-up needed for Connecteam user 17760356:
       - Employee marked "not an Australian resident for tax" - set the foreign-resident or working-holiday-maker tax scale in Employment Hero.
       - Self-managed super fund (fund ABN given, no USI) - add the SMSF to the employee in Employment Hero manually.
       The sync completed with safe defaults - finish this by hand in Employment Hero."
@@ -127,7 +127,7 @@ describe("followUpNoticeMessage", () => {
 
   it("leads with the employee's name and keeps the id in brackets when a name is known", () => {
     const msg = followUpNoticeMessage(["x"], { ctUserId: 17760356, firstName: "Jane", lastName: "Smith" });
-    expect(msg).toContain("Payroll follow-up needed for Jane Smith (17760356):");
+    expect(msg).toContain("Employment Hero follow-up needed for Jane Smith (17760356):");
   });
 });
 
@@ -136,7 +136,7 @@ describe("systemAlertMessage", () => {
     const msg = systemAlertMessage("EH 503: service unavailable", { ctUserId: 42 });
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
-      "Payroll sync failed for Connecteam user 42 and could not be retried.
+      "Employment Hero sync failed for Connecteam user 42 and could not be retried.
       Detail: EH 503: service unavailable
       No employee action is possible - check the Employment Hero API status and credentials."
     `);

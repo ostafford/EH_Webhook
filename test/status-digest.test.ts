@@ -29,7 +29,7 @@ describe("digestMessages", () => {
     const [msg] = digestMessages(employees, 4);
     expect(msg).toBe(
       [
-        "Payroll sync status: 3 of 4 employees need attention.",
+        "Employment Hero sync status: 3 of 4 employees need attention.",
         "",
         "Waiting on employee:",
         "- Connecteam user 4 — taxFileNumber; bsb",

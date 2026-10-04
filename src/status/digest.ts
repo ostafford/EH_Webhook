@@ -44,7 +44,7 @@ export function digestMessages(employees: readonly DigestEmployee[], totalCount:
   }
 
   const lines: string[] = [
-    `Payroll sync status: ${nonReady.length} of ${totalCount} employees need attention.`,
+    `Employment Hero sync status: ${nonReady.length} of ${totalCount} employees need attention.`,
   ];
   for (const state of STATE_ORDER) {
     const group = nonReady.filter((e) => e.state === state);
