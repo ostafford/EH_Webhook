@@ -1,3 +1,6 @@
+// Some cases load the real clients/self/field-map.json, so they fail while a
+// client's map is mid-tuning. The wizard checks the map with
+// `npm run validate-field-map` instead (issue #56).
 import { describe, it, expect, beforeEach } from "vitest";
 import { loadFieldMap, resetFieldMapCache, FieldMapError } from "../src/mapping/loader.js";
 
