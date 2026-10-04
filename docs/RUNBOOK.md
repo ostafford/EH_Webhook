@@ -598,6 +598,96 @@ this unaided.
 
 ---
 
+## Tearing down / starting over
+
+> **Deleting the Worker alone is not a reset.** Deleting `eh-webhook` (in the
+> dashboard or with `wrangler delete`) leaves its D1 database and both queues
+> behind. A wizard re-run then says "Database already exists - reusing it", and
+> the old `employee_map`, onboarding state and audit log carry over into what
+> was meant to be a clean deployment. Delete everything below.
+
+> **Check the account first.** These commands delete by name, and every
+> deployment uses the same names. Run `npx wrangler whoami` and confirm it's the
+> account you mean to clear, not one running a live Sync.
+
+Two paths. **Starting over** (re-running the wizard on the same Connecteam and
+Employment Hero accounts) is steps 1–6. **Removing for good** adds step 7.
+
+1. **Back up the database (optional).** It holds ids, outcomes and audit rows
+   only, never employee values, but it's the only history of who synced when:
+
+   ```bash
+   npx wrangler d1 export eh-webhook --remote --output=eh-webhook-backup.sql
+   ```
+
+2. **Delete the Connecteam webhook first**, so Connecteam stops posting to a
+   URL that's about to disappear. Find its id (the one whose `url` is this
+   Worker's `/webhook`), then delete it. This is the same call the wizard uses
+   to remove duplicates:
+
+   ```bash
+   curl -sS -H "X-API-KEY: $CT_API_KEY" https://api.connecteam.com/settings/v1/webhooks
+   curl -sS -X DELETE -H "X-API-KEY: $CT_API_KEY" \
+     https://api.connecteam.com/settings/v1/webhooks/<id>
+   ```
+
+   On a restart to the same URL the wizard would update a leftover webhook
+   rather than add a second one, but a new deployment with a different URL
+   would leave the old one posting to nothing.
+
+3. **Delete the Worker.** This also removes its secrets, its 1-minute cron and
+   its queue-consumer settings. `--dry-run` first shows what it would do:
+
+   ```bash
+   npx wrangler delete eh-webhook --dry-run
+   npx wrangler delete eh-webhook
+   ```
+
+4. **Delete both queues.** If one refuses because a consumer is still
+   attached, remove the consumer
+   (`npx wrangler queues consumer remove <queue> eh-webhook`) and retry:
+
+   ```bash
+   npx wrangler queues delete eh-webhook-sync
+   npx wrangler queues delete eh-webhook-dlq
+   ```
+
+5. **Delete the D1 database.** This is the step that makes it a real reset,
+   and it **cannot be undone**:
+
+   ```bash
+   npx wrangler d1 delete eh-webhook
+   ```
+
+   A wizard re-run creates a fresh database and writes its id into
+   `wrangler.jsonc`. On the manual path, replace `database_id` yourself (§5).
+
+6. **The GitHub health watch.** `.github/workflows/health-watch.yml`
+   polls `/health` every 10 minutes and emails on failure, so once the Worker
+   is gone it fails every run. For a restart, leave it: it recovers once the
+   new deployment answers on the same URL (or set the `HEALTH_URL` repository
+   variable to the new one). For good, disable it: GitHub → **Actions → Health watch →
+   ⋯ → Disable workflow**.
+
+7. **Removing for good only:**
+   - **API keys:** revoke the Connecteam API key (Integrations → API Keys,
+     §2a) and the Employment Hero API key (My Account → Security → API Key,
+     §3). On a restart, keep them, or rotate them as
+     in [Rotating keys](#rotating-keys).
+   - **Integrator access:** Cloudflare → **Manage Account → Members** →
+     remove the integrator (see §8).
+   - **Integrator telemetry:** tell the integrator, so they close this
+     client's issue on the relay. The relay itself is shared; leave it.
+   - **Local files:** delete `.dev.vars` and any `setup-wizard-*.log` (they
+     can name the client's accounts), or the whole clone.
+
+**Leave these in Connecteam either way:** the custom fields (they hold the
+employees' own data), the custom publisher and the alerts channel. The wizard
+reuses them on a restart. Deleting them is the client's decision, not part of a
+teardown.
+
+---
+
 ## What is never stored or logged
 
 No employee value — tax file number, bank BSB / account number / name, super
