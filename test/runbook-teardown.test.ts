@@ -45,6 +45,18 @@ describe("runbook teardown section (issue #61)", () => {
     expect(teardown).toMatch(/deleting the worker alone is not a reset/i);
   });
 
+  it("disconnects every queue consumer before deleting the Worker", () => {
+    // Cloudflare has refused to delete a Worker that is still a queue consumer:
+    // "script still in use as a consumer for a queue [code: 10064]".
+    const deleteWorker = teardown.search(new RegExp(`wrangler delete ${workerName}(?! --dry-run)`));
+    expect(deleteWorker).toBeGreaterThan(-1);
+    for (const queue of queues) {
+      const remove = teardown.indexOf(`wrangler queues consumer remove ${queue} ${workerName}`);
+      expect(remove, `consumer remove for ${queue}`).toBeGreaterThan(-1);
+      expect(remove, `consumer remove for ${queue} comes first`).toBeLessThan(deleteWorker);
+    }
+  });
+
   it("covers the Connecteam webhook and the GitHub health watch", () => {
     expect(teardown).toMatch(/connecteam webhook/i);
     expect(teardown).toMatch(/health-watch/);

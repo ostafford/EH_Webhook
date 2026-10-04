@@ -611,7 +611,7 @@ this unaided.
 > account you mean to clear, not one running a live Sync.
 
 Two paths. **Starting over** (re-running the wizard on the same Connecteam and
-Employment Hero accounts) is steps 1–6. **Removing for good** adds step 7.
+Employment Hero accounts) is steps 1–7. **Removing for good** adds step 8.
 
 1. **Back up the database (optional).** It holds ids, outcomes and audit rows
    only, never employee values, but it's the only history of who synced when:
@@ -635,24 +635,40 @@ Employment Hero accounts) is steps 1–6. **Removing for good** adds step 7.
    rather than add a second one, but a new deployment with a different URL
    would leave the old one posting to nothing.
 
-3. **Delete the Worker.** This also removes its secrets, its 1-minute cron and
-   its queue-consumer settings. `--dry-run` first shows what it would do:
+3. **Disconnect the Worker from both queues.** Cloudflare refuses both
+   deletes while the Worker is still attached (checked on a throwaway Worker
+   and queues, 2026-10-04):
+   - the Worker: "Cannot delete this Worker as it is a consumer for a Queue
+     [code: 10064]"
+   - the dead-letter queue: "Cannot delete queue 'eh-webhook-dlq' that serves
+     as dead letter queue for consumers [code: 11005]"
+
+   So detach it first:
+
+   ```bash
+   npx wrangler queues consumer remove eh-webhook-sync eh-webhook
+   npx wrangler queues consumer remove eh-webhook-dlq eh-webhook
+   ```
+
+   Until step 4, the cron can still add messages to the sync queue with
+   nothing reading them. They go when the queue is deleted in step 5.
+
+4. **Delete the Worker.** This also removes its secrets and its 1-minute cron.
+   `--dry-run` first shows what it would do:
 
    ```bash
    npx wrangler delete eh-webhook --dry-run
    npx wrangler delete eh-webhook
    ```
 
-4. **Delete both queues.** If one refuses because a consumer is still
-   attached, remove the consumer
-   (`npx wrangler queues consumer remove <queue> eh-webhook`) and retry:
+5. **Delete both queues:**
 
    ```bash
    npx wrangler queues delete eh-webhook-sync
    npx wrangler queues delete eh-webhook-dlq
    ```
 
-5. **Delete the D1 database.** This is the step that makes it a real reset,
+6. **Delete the D1 database.** This is the step that makes it a real reset,
    and it **cannot be undone**:
 
    ```bash
@@ -662,14 +678,14 @@ Employment Hero accounts) is steps 1–6. **Removing for good** adds step 7.
    A wizard re-run creates a fresh database and writes its id into
    `wrangler.jsonc`. On the manual path, replace `database_id` yourself (§5).
 
-6. **The GitHub health watch.** `.github/workflows/health-watch.yml`
+7. **The GitHub health watch.** `.github/workflows/health-watch.yml`
    polls `/health` every 10 minutes and emails on failure, so once the Worker
    is gone it fails every run. For a restart, leave it: it recovers once the
    new deployment answers on the same URL (or set the `HEALTH_URL` repository
    variable to the new one). For good, disable it: GitHub → **Actions → Health watch →
    ⋯ → Disable workflow**.
 
-7. **Removing for good only:**
+8. **Removing for good only:**
    - **API keys:** revoke the Connecteam API key (Integrations → API Keys,
      §2a) and the Employment Hero API key (My Account → Security → API Key,
      §3). On a restart, keep them, or rotate them as
