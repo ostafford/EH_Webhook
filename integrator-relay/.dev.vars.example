@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `wrangler dev`. NEVER commit .dev.vars.
+RELAY_SECRET=choose-a-long-random-string
+GITHUB_TOKEN=github_pat_...
+# GITHUB_REPO and EMAIL_WEBHOOK_URL are in wrangler.jsonc `vars`, not here.
