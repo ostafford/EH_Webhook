@@ -366,10 +366,18 @@ the sweep doesn't use the webhook.
 | Path | Test | Expected |
 |---|---|---|
 | Approval | Approve a test employee's Onboarding pack | They appear in Employment Hero within ~1 min (the sweep runs every minute). **On a first deploy, allow up to 15 min**: Cloudflare can take that long to start a new Cron Trigger. Until `ops.lastSweepOkAt` on `/health` shows a time, the sweep hasn't run yet; the wizard offers to wait for it |
-| Edit | Change that employee's Connecteam profile | Their EH record updates (via the `user_updated` webhook — step 6) |
+| Edit | Change that employee's **Legal Surname** (or another synced custom field) in Connecteam | Their EH record updates (via the `user_updated` webhook — step 6). Don't test with the profile *First name*: it doesn't sync (see below) |
 | Correction | Enter a deliberately bad BSB | The employee gets a **Correction message** from the custom publisher |
 | Follow-up | Set a test employee to non-resident | A **Manual-follow-up notice** appears in the **alerts channel**; the Sync still completes |
 | Incomplete | Sync an employee who has **no award / pay-run defaults** in EH | The record is created but EH marks it `Incomplete`; a **Manual-follow-up notice** ("a payroll admin needs to finish setup … pay-run defaults / award / pay rate") goes to the alerts channel — **not** to the employee. A payroll admin sets the award in EH; the record then reads `Complete`. |
+
+> **EH uses the Legal First Name / Legal Surname. Changing the profile name
+> doesn't change payroll.** The *First name* and *Last name* on a Connecteam
+> profile are the employee's **preferred** name, and are deliberately not synced.
+> EH's first name and surname come from the **Legal First Name** and **Legal
+> Surname** custom fields (the ATO needs the legal name). Editing the profile
+> name still fires the webhook, but leaves EH unchanged. That's expected, not a
+> bug. To change a name in payroll, edit the Legal field.
 
 `INTERNATIONAL` address and SMSF super (fund ABN, no USI) also produce a
 Manual-follow-up notice. When several apply at once (e.g. a non-resident whose
@@ -531,6 +539,12 @@ minutes for the rest of the digest day (UTC). The Worker logs
 > possible; a payroll admin must check both people's records in EH directly.
 > This never shows up in `/status` as `waiting_on_admin` — it surfaces as
 > `broken`, the same bucket as a dead-lettered job.
+
+### "I changed their name and payroll didn't update"
+EH uses the **Legal** First Name / Legal Surname. Changing the profile name
+doesn't change payroll. The profile *First name* is the employee's preferred
+name and is not synced (`docs/field-mapping.md`). Edit the **Legal First Name**
+or **Legal Surname** custom field instead; that edit syncs like any other.
 
 ### Re-syncing an employee
 A resync is triggered by a **profile edit** in Connecteam (the `user_updated`
