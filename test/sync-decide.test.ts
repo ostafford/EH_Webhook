@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decide, compareReadBack, auditDetail } from "../src/sync/decide.js";
+import { decide, compareReadBack, auditDetail, correctionFieldsFromAudit } from "../src/sync/decide.js";
 import type { EhResult } from "../src/eh/client.js";
 import type { EhWriteResult } from "../src/eh/types.js";
 
@@ -263,5 +263,23 @@ describe("auditDetail", () => {
     expect(auditDetail({ kind: "ok" })).toBe("synced");
     expect(auditDetail({ kind: "retry", detail: "EH 503" })).toBe("retry: EH 503");
     expect(auditDetail({ kind: "follow_up", reasons: ["a", "b"] })).toBe("follow_up: a | b");
+  });
+});
+
+describe("correctionFieldsFromAudit (issue #71)", () => {
+  it("reads back the field names auditDetail wrote for a correction", () => {
+    const detail = auditDetail({
+      kind: "correction",
+      fields: [
+        { field: "bankAccounts[0].bsb", reason: "invalid" },
+        { field: "(unknown)", reason: "Tax File Number is invalid" },
+      ],
+    });
+    expect(correctionFieldsFromAudit(detail)).toEqual(["bankAccounts[0].bsb", "tax-file-number-is-invalid"]);
+  });
+
+  it("is empty for a row that isn't a correction, or has no detail", () => {
+    expect(correctionFieldsFromAudit("synced")).toEqual([]);
+    expect(correctionFieldsFromAudit(null)).toEqual([]);
   });
 });

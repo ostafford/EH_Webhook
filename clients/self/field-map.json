@@ -13,6 +13,7 @@
     "payRateTemplate": { "source": "connecteamField" }
   },
   "identity": { "externalIdFrom": "userId", "emailFallbackFrom": "email" },
+  "messages": { "employeeSuccess": false },
   "fields": [
     { "eh": "firstName", "from": { "customFieldId": 42920713 }, "transform": "trimString", "required": true },
     { "eh": "surname", "from": { "customFieldId": 42920714 }, "transform": "trimString", "required": true },

@@ -220,6 +220,21 @@ export function auditDetail(decision: SyncDecision): string {
   }
 }
 
+/**
+ * The field names a `correction` row's detail (written by {@link auditDetail})
+ * lists, or `[]` for any other detail (#71). The success message reads them
+ * back to say what was fixed.
+ */
+export function correctionFieldsFromAudit(detail: string | null): string[] {
+  const prefix = "correction: ";
+  if (!detail?.startsWith(prefix)) return [];
+  return detail
+    .slice(prefix.length)
+    .split(", ")
+    .map((f) => f.trim())
+    .filter(Boolean);
+}
+
 function issueToFieldError(i: MappingIssue): EhFieldError {
   return { field: i.ehField, reason: i.reason };
 }

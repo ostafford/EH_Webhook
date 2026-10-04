@@ -100,6 +100,9 @@ function fakeGateway(
     async appendSyncLog(entry) {
       log.push(entry);
     },
+    async latestCorrectionDetail(id: number) {
+      return log.filter((l) => l.ctUserId === id && l.outcome === "correction").at(-1)?.detail ?? null;
+    },
   };
 }
 
@@ -570,7 +573,8 @@ describe("runSyncJob - read-back mismatch", () => {
     const out = await runSyncJob(job(), deps({ eh, ct: ct as never }));
 
     expect(out.status).toBe("synced");
-    expect(ct.dms).toHaveLength(0);
+    // No Correction - only the first-sync success message (#71).
+    expect(ct.dms.map((d) => d.text)).toEqual(["Thanks, your details have now been received in Employment Hero."]);
   });
 });
 
@@ -1055,5 +1059,141 @@ describe("retry backoff (issue #90)", () => {
 
   it("finishes well inside the 1 h Correction claim, so a late retry can't re-send a message", () => {
     expect(windowSeconds * 1000).toBeLessThan(CORRECTION_NOTICE_DEDUPE_MS / 2);
+  });
+});
+
+describe("runSyncJob - employee success message (issue #71)", () => {
+  const FIRST = "Thanks, your details have now been received in Employment Hero.";
+  const nonResident = (): ConnecteamUser => {
+    const u = cloneUser();
+    u.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
+    u.customFields.find((f) => f.customFieldId === 42923276)!.value = [{ id: 1, value: "No" }];
+    return u;
+  };
+  /** An employee with an open Correction cycle, whose last Correction named `fields`. */
+  const inCorrection = (fields: string) => {
+    const store = fakeGateway({ ctUserId: 17760356, failureCycleCount: 1, lastPayloadHash: "old" });
+    store.rows.get(17760356)!.lastOutcome = "correction";
+    store.log.push({ ctUserId: 17760356, at: 1, outcome: "correction", detail: `correction: ${fields}` });
+    return store;
+  };
+  const dmsTo = (ct: CtFake, id = 17760356) => ct.dms.filter((d) => d.userId === id).map((d) => d.text);
+
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    return () => vi.restoreAllMocks();
+  });
+
+  it("first successful sync -> exactly one message to the employee", async () => {
+    const ct = fakeCt(cloneUser());
+    const out = await runSyncJob(job(), deps({ ct: ct as never }));
+    expect(out.status).toBe("synced");
+    expect(dmsTo(ct)).toEqual([FIRST]);
+  });
+
+  it("first sync whose message fails: retries, and the retry sends it exactly once", async () => {
+    const store = fakeGateway();
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set(17760356, 1);
+    const attempt = () => runSyncJob(job(), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect(store.rows.get(17760356)?.lastPayloadHash ?? null).toBeNull();
+    expect((await attempt()).status).toBe("synced");
+    expect(dmsTo(ct)).toEqual([FIRST]);
+  });
+
+  it("a redelivery after the message went out (crash before the save) doesn't send it again", async () => {
+    const store = fakeGateway();
+    let failNextSave = true;
+    const originalSave = store.saveEmployeeLink.bind(store);
+    store.saveEmployeeLink = async (patch) => {
+      if (failNextSave) {
+        failNextSave = false;
+        throw new Error("D1 write failed");
+      }
+      return originalSave(patch);
+    };
+    const ct = fakeCt(cloneUser());
+    const attempt = () => runSyncJob(job(), deps({ store, ct: ct as never }));
+
+    await expect(attempt()).rejects.toThrow("D1 write failed");
+    await attempt();
+    expect(dmsTo(ct)).toEqual([FIRST]);
+  });
+
+  it("a fixed Correction -> one message naming what was fixed, and the cycle resets", async () => {
+    const store = inCorrection("bankAccounts[0].bsb, tax-file-number-is-invalid");
+    const ct = fakeCt(cloneUser());
+
+    const out = await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+
+    expect(out.status).toBe("synced");
+    expect(dmsTo(ct)).toEqual([
+      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.",
+    ]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
+  });
+
+  it("a fixed Correction whose message fails: retries with the cycle still open, then sends the same message once", async () => {
+    const store = inCorrection("taxFileNumber");
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set(17760356, 1);
+    const attempt = () => runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
+
+    expect((await attempt()).status).toBe("synced");
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero."]);
+    expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
+  });
+
+  it("a fix that lands as a Manual follow-up still thanks the employee, and a failed admin notice doesn't repeat the DM", async () => {
+    const store = inCorrection("taxFileNumber");
+    const ct = fakeCt(nonResident());
+    ct.failSends.set("chan-1", 1);
+    const attempt = () => runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect((await attempt()).status).toBe("follow_up");
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero."]);
+    expect(ct.channels).toHaveLength(1);
+  });
+
+  it("a first sync whose DM fails posts no admin notice until the retry", async () => {
+    const store = fakeGateway();
+    const ct = fakeCt(nonResident());
+    ct.failSends.set(17760356, 1);
+    const attempt = () => runSyncJob(job(), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect(ct.channels).toHaveLength(0);
+    expect((await attempt()).status).toBe("follow_up");
+    expect(dmsTo(ct)).toEqual([FIRST]);
+    expect(ct.channels).toHaveLength(1);
+  });
+
+  it("an ordinary edit after a successful sync sends nothing", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, ehEmployeeId: "987", lastPayloadHash: "old" });
+    store.rows.get(17760356)!.lastOutcome = "ok";
+    const ct = fakeCt(cloneUser());
+    await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+    expect(ct.dms).toEqual([]);
+  });
+
+  it("an employee synced before outcomes were tracked (EH id, no lastOutcome) gets nothing on an edit", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, ehEmployeeId: "987", lastPayloadHash: "old" });
+    const ct = fakeCt(cloneUser());
+    await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+    expect(ct.dms).toEqual([]);
+  });
+
+  it("sends nothing when the client switched it off", async () => {
+    const off = parseFieldMap({ ...fieldMap, messages: { employeeSuccess: false } });
+    const ct = fakeCt(cloneUser());
+    const out = await runSyncJob(job(), deps({ ct: ct as never, fieldMap: off }));
+    expect(out.status).toBe("synced");
+    expect(ct.dms).toEqual([]);
   });
 });

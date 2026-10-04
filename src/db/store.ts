@@ -4,7 +4,7 @@
  * unit tests use a fake gateway instead.
  */
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { employeeMap, onboardingState, syncLog, syncMeta } from "./schema.js";
 import type {
   EmployeeLink,
@@ -122,6 +122,16 @@ export class SyncStore implements SyncGateway {
       outcome: entry.outcome,
       detail: entry.detail,
     });
+  }
+
+  async latestCorrectionDetail(ctUserId: number): Promise<string | null> {
+    const [row] = await this.#db
+      .select({ detail: syncLog.detail })
+      .from(syncLog)
+      .where(and(eq(syncLog.ctUserId, ctUserId), eq(syncLog.outcome, "correction")))
+      .orderBy(desc(syncLog.id))
+      .limit(1);
+    return row?.detail ?? null;
   }
 
   /** True if `onboarding_state` has ever recorded this person as `completed` (ADR-0002). */

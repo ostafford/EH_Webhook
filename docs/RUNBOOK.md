@@ -17,7 +17,7 @@ defined in [`../CONTEXT.md`](../CONTEXT.md).
 |---|---|
 | **Client's technical person** | Runs this document / the wizard. Owns the Cloudflare account and the deployment from then on. |
 | **Integrator** | Joins a one-time ~1 hr onboarding call: helps create the Connecteam objects and API keys, watches the wizard run, confirms `/health`. Never holds the client's credentials or deploys for them. |
-| **Client's HR / payroll admins** | No setup role. After go-live they action the three message types (see [Operations](#day-to-day-operations)). |
+| **Client's HR / payroll admins** | No setup role. After go-live they action the message types (see [Operations](#day-to-day-operations)). |
 
 The whole of steps 1–7 is driven by **`scripts/setup-wizard.sh`** — it opens each
 page, captures every value, provisions D1 + Queues, pushes the secrets and
@@ -510,7 +510,7 @@ re-run it once Connecteam is back. A failed weekly digest retries every 30
 minutes for the rest of the digest day (UTC). The Worker logs
 `message_send_failed` for each failure.
 
-### The three message types — who acts
+### The message types — who acts
 
 | Message | Recipient | Action |
 |---|---|---|
@@ -518,6 +518,7 @@ minutes for the rest of the digest day (UTC). The Worker logs
 | **Manual-follow-up notice** | alerts channel | a payroll admin finishes the item in EH by hand — foreign / working-holiday-maker tax scale, add the SMSF, enter the overseas address, **or set the award / pay-run defaults for a record EH marked `Incomplete`** — re-posted at most once per ~12 h per employee per reason-set |
 | **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job — re-posted at most once per hour per employee while the fault persists |
 | **Identity-collision alert** | alerts channel | two Connecteam people's EH records got merged into one (see below) — separate them directly in EH; re-posted at most once per hour per employee while it persists |
+| **Success message** | the employee (DM) | none. Sent once on their first successful sync, and once when a Correction is fixed (naming what was fixed). Off for a client with `"messages": { "employeeSuccess": false }` in `field-map.json`; on otherwise. Never sent for an ordinary edit |
 
 > **Identity-collision alert.** Employment Hero's unstructured-employee endpoint
 > matches/merges by **Tax File Number**, not by the `externalId` this sync sends

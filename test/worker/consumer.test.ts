@@ -192,6 +192,26 @@ describe("queue consumer (in workerd, real D1)", () => {
     expect(row?.last_payload_hash).toBeTruthy();
   });
 
+  it("thanks the employee by topic once their Correction is fixed, reading the Correction from real D1 (issue #71)", async () => {
+    const bad = world({ ehValidationMessage: "BankAccount1: BSB must contain 6 digits only" });
+    expect((await runSyncJob(job(), bad.deps)).status).toBe("correction");
+
+    // The employee fixes it: a new edit (new payload), and EH now accepts it.
+    const fixedUser = structuredClone(syntheticUser);
+    fixedUser.customFields.find((f) => f.customFieldId === 25145108)!.value = "Senior Support Officer";
+    const good = world({ ctUser: fixedUser });
+    const out = await runSyncJob(job({ eventTimestamp: 2000 }), good.deps);
+
+    expect(out.status).toBe("synced");
+    expect(good.sent.dms.map((d) => d.text)).toEqual([
+      "Thanks, that's fixed: your bank details have now been updated in Employment Hero.",
+    ]);
+    const row = await env.DB.prepare("SELECT failure_cycle_count FROM employee_map WHERE ct_user_id = ?")
+      .bind(syntheticUser.userId)
+      .first<{ failure_cycle_count: number }>();
+    expect(row?.failure_cycle_count).toBe(0);
+  });
+
   it("skips an identical re-delivery for an employee stuck in correction (no re-message, no cycle bump)", async () => {
     const w = world({ ehValidationMessage: "BankAccount1: BSB must contain 6 digits only" });
     await runSyncJob(job({ eventTimestamp: 1000 }), w.deps);

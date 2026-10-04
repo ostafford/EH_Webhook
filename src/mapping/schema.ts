@@ -183,6 +183,15 @@ export const fieldMap = z
       .default({ externalIdFrom: "userId", emailFallbackFrom: "email" }),
     fields: z.array(fieldRule).min(1),
     rules: rules.optional(),
+    /**
+     * Optional employee-facing messages (issue #71). `employeeSuccess`: a one-off
+     * DM on the employee's first successful sync and when a Correction is
+     * fixed. On unless a client sets it to false.
+     */
+    messages: z
+      .object({ employeeSuccess: z.boolean().default(true) })
+      .strict()
+      .default({ employeeSuccess: true }),
   })
   .strict();
 

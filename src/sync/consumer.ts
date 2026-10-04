@@ -23,13 +23,23 @@ import { applyFieldMap, type ConnecteamUser as MappingUser } from "../mapping/ap
 import type { ConnecteamClient } from "../connecteam/client.js";
 import type { CtResult, PayRate } from "../connecteam/types.js";
 import type { EhPayrollClient } from "../eh/client.js";
-import { decide, compareReadBack, auditDetail, type SyncDecision, type ReadBackResult } from "./decide.js";
+import {
+  decide,
+  compareReadBack,
+  auditDetail,
+  correctionFieldsFromAudit,
+  type SyncDecision,
+  type ReadBackResult,
+} from "./decide.js";
 import {
   correctionMessage,
   managerEscalationMessage,
   followUpNoticeMessage,
   systemAlertMessage,
   collisionAlertMessage,
+  correctionTopics,
+  firstSyncMessage,
+  correctionFixedMessage,
   type PersonRef,
 } from "./messages.js";
 import { advanceCycle, directManagerUserId, MANAGER_ESCALATION_CYCLE } from "./cycles.js";
@@ -44,7 +54,7 @@ import {
   SYSTEM_ALERT_NOTICE_DEDUPE_MS,
   CORRECTION_NOTICE_DEDUPE_MS,
 } from "./notices.js";
-import type { SyncGateway, SyncOutcomeLabel } from "./gateway.js";
+import type { EmployeeLink, SyncGateway, SyncOutcomeLabel } from "./gateway.js";
 
 export interface SyncDeps {
   ct: Pick<
@@ -277,6 +287,22 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
       }
     }
   } else {
+    // The employee success message (#71) goes out BEFORE advanceCycle resets
+    // the cycle, so a failed send retries with the cycle still open and picks
+    // the same wording. One claim covers both wordings: after a reset, a retry
+    // would choose the other one, and its own key would let it send twice.
+    if (deps.fieldMap.messages.employeeSuccess) {
+      const text = await successMessage(link, deps.store);
+      if (text !== null) {
+        const key = await noticeKey("employee_success", ctUserId, [hash]);
+        if (await shouldPostNotice(deps.store, key, CORRECTION_NOTICE_DEDUPE_MS, now())) {
+          const sent = await sendClaimed(deps.store, key, ctUserId, "employee_success", () =>
+            deps.ct.sendDirectMessage(ctUserId, text),
+          );
+          if (!sent) return sendFailed("employee_success");
+        }
+      }
+    }
     await advanceCycle(deps.store, ctUserId, decision);
     if (decision.kind === "follow_up") {
       // The record synced (safe defaults); a payroll admin still has to finish it
@@ -489,6 +515,30 @@ async function sendClaimed(
     ...("status" in res ? { status: res.status } : {}),
   });
   return false;
+}
+
+/** Outcomes that mean the person has synced successfully before. */
+const SYNCED_BEFORE: readonly SyncOutcomeLabel[] = ["ok", "follow_up", "resolved"];
+
+/**
+ * The success message (#71) for a job that just synced successfully, judged
+ * from the person's state BEFORE this job, or null for an ordinary edit:
+ * - an open Correction cycle -> "that's fixed", naming what it asked about
+ * - never synced before -> "received"
+ * A row saved before `lastOutcome` existed counts as synced if it has an EH id.
+ */
+async function successMessage(
+  link: EmployeeLink | null,
+  store: Pick<SyncGateway, "latestCorrectionDetail">,
+): Promise<string | null> {
+  if (link && link.failureCycleCount > 0) {
+    const fields = correctionFieldsFromAudit(await store.latestCorrectionDetail(link.ctUserId));
+    return correctionFixedMessage(correctionTopics(fields.map((field) => ({ field, reason: "" }))));
+  }
+  const syncedBefore =
+    link !== null &&
+    (link.lastOutcome != null ? SYNCED_BEFORE.includes(link.lastOutcome) : link.ehEmployeeId !== null);
+  return syncedBefore ? null : firstSyncMessage();
 }
 
 function sendFailed(notice: NoticeKind): SyncJobOutcome {

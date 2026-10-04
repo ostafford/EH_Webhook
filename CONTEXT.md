@@ -25,7 +25,7 @@ The condition that triggers a correction message. Covers: EH rejects the write (
 _Avoid_: checksum, 422
 
 **Correction message**:
-One of three outbound message types. Sent to the **employee** who entered bad data (data that failed EH validation), as a DM from the Connecteam **custom publisher**. On the third failed Correction cycle it also goes to the employee's Direct manager.
+One of the outbound message types. Sent to the **employee** who entered bad data (data that failed EH validation), as a DM from the Connecteam **custom publisher**. On the third failed Correction cycle it also goes to the employee's Direct manager.
 _Avoid_: notification, alert
 
 **Manual-follow-up notice**:
@@ -33,6 +33,10 @@ Second message type. Posted to the admin **channel**. For data that synced fine 
 
 **System alert**:
 Third message type. Posted to the admin **channel**. For failures the employee cannot fix — EH outage, auth failure, bugs — raised when a queue message dead-letters.
+
+**Success message**:
+Fourth message type (issue #71). A one-off DM to the **employee**: once on their first successful sync ("received in Employment Hero"), and once when a Correction cycle is fixed, naming what the Correction asked about ("your bank details have now been updated in Employment Hero"). Never on an ordinary edit, never to the admin channel, and never claims the record is Complete. Per client: `messages.employeeSuccess` in `field-map.json` (on unless set to `false`).
+_Avoid_: confirmation, receipt
 
 **Custom publisher**:
 A Connecteam feature: a named non-human sender that the API can post chat messages as.
