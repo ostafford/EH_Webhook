@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   buildStatusRoster,
   maybeRunStatusDigest,
   runStatusDigestNow,
   STATUS_DIGEST_MIN_GAP_MS,
+  STATUS_DIGEST_RETRY_MS,
 } from "../src/status/service.js";
 import type { RosterRow } from "../src/status/roster.js";
 import type { ConnecteamUser, CtResult } from "../src/connecteam/types.js";
@@ -24,8 +25,10 @@ function fakeStore(rows: RosterRow[]) {
   };
 }
 
-function fakeCt(users: Record<number, { firstName: string; lastName: string }> = {}) {
+/** `failAt`: 0-based indexes of the channel-send calls that fail as `retryable`. */
+function fakeCt(users: Record<number, { firstName: string; lastName: string }> = {}, failAt: number[] = []) {
   const channels: Array<{ id: string; text: string }> = [];
+  let calls = 0;
   return {
     channels,
     async getUser(userId: number): Promise<CtResult<ConnecteamUser | null>> {
@@ -33,9 +36,10 @@ function fakeCt(users: Record<number, { firstName: string; lastName: string }> =
       if (!u) return { outcome: "ok", data: null };
       return { outcome: "ok", data: { userId, firstName: u.firstName, lastName: u.lastName, customFields: [] } };
     },
-    async sendChannelMessage(id: string, text: string) {
+    async sendChannelMessage(id: string, text: string): Promise<CtResult<null>> {
+      if (failAt.includes(calls++)) return { outcome: "retryable", status: 429, detail: "rate limited" };
       channels.push({ id, text });
-      return { outcome: "ok" as const, data: null };
+      return { outcome: "ok", data: null };
     },
   };
 }
@@ -175,5 +179,54 @@ describe("maybeRunStatusDigest", () => {
 
     const result = await maybeRunStatusDigest({ store, ct, adminChannelId: ADMIN_CHANNEL, now: () => firstMonday });
     expect(result).toBe("sent");
+  });
+});
+
+describe("a failed digest send (issue #94)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  // Enough Waiting-on-admin rows that the digest splits into several messages.
+  const bigRoster = () =>
+    Array.from({ length: 30 }, (_, i) =>
+      row({ ctUserId: 1000 + i, lastOutcome: "follow_up", latestOutcome: "follow_up", latestDetail: "follow_up: reason" }),
+    );
+
+  it("runStatusDigestNow reports a full send", async () => {
+    const result = await runStatusDigestNow({ store: fakeStore([row({ ctUserId: 1 })]), ct: fakeCt(), adminChannelId: ADMIN_CHANNEL });
+    expect(result).toEqual({ outcome: "sent", messages: 1 });
+  });
+
+  it("stops at the first failed chunk, so the digest never arrives with a gap in the middle", async () => {
+    const ct = fakeCt({}, [1]);
+
+    const result = await runStatusDigestNow({ store: fakeStore(bigRoster()), ct, adminChannelId: ADMIN_CHANNEL });
+
+    expect(result.outcome).toBe("failed");
+    if (result.outcome !== "failed") return;
+    expect(result.messages).toBeGreaterThan(2);
+    expect(result.sent).toBe(1);
+    expect(ct.channels).toHaveLength(1);
+  });
+
+  it("a failed weekly digest leaves the weekly marker unset and retries after a pause, the same day", async () => {
+    const store = fakeStore(bigRoster());
+    const ct = fakeCt({}, [0]);
+    const monday = new Date("2026-09-14T09:00:00Z").getTime();
+    const tick = (at: number) => maybeRunStatusDigest({ store, ct, adminChannelId: ADMIN_CHANNEL, now: () => at });
+
+    expect(await tick(monday)).toBe("failed");
+    expect(store.meta.get("last_status_digest_at")).toBeUndefined();
+
+    // The cron ticks every minute: no retry (or roster rebuild) until the pause is up.
+    expect(await tick(monday + 60_000)).toBe("skipped");
+    expect(await tick(monday + STATUS_DIGEST_RETRY_MS - 1)).toBe("skipped");
+    expect(ct.channels).toHaveLength(0);
+
+    expect(await tick(monday + STATUS_DIGEST_RETRY_MS)).toBe("sent");
+    expect(store.meta.get("last_status_digest_at")).toBe(monday + STATUS_DIGEST_RETRY_MS);
+    expect(ct.channels.length).toBeGreaterThan(1);
   });
 });

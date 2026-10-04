@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { runRecheck, type RecheckDeps } from "../src/cron/recheck.js";
 import type { EmployeeLink, EmployeeLinkPatch, RecheckGateway, SyncLogEntry } from "../src/sync/gateway.js";
 
@@ -74,14 +74,20 @@ function fakeEh(byExternalId: Record<string, { status: string | null } | "retrya
 
 type CtFake = RecheckDeps["ct"] & { channels: Array<{ id: string; text: string }> };
 
-function fakeCt(): CtFake {
+/** `failSends`: how many channel sends fail as `retryable` before they start working. */
+function fakeCt(failSends = 0): CtFake {
   const channels: Array<{ id: string; text: string }> = [];
+  let failsLeft = failSends;
   return {
     channels,
     async getUser(userId: number) {
       return { outcome: "ok", data: { userId, firstName: "Ada", lastName: "Lovelace" } as never };
     },
     async sendChannelMessage(id: string, text: string) {
+      if (failsLeft > 0) {
+        failsLeft--;
+        return { outcome: "retryable", status: 429, detail: "rate limited" };
+      }
       channels.push({ id, text });
       return { outcome: "ok", data: null };
     },
@@ -204,5 +210,37 @@ describe("runRecheck", () => {
     expect(sent).toEqual([
       "✅ Connecteam user 100 is now Complete in Employment Hero - no more action needed.",
     ]);
+  });
+});
+
+describe("runRecheck - a failed resolved notice (issue #94)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("leaves the row as follow_up so the next run retries, and logs message_send_failed", async () => {
+    const logged: Array<Record<string, unknown>> = [];
+    vi.spyOn(console, "log").mockImplementation((line: string) => {
+      logged.push(JSON.parse(line) as Record<string, unknown>);
+    });
+    const store = fakeStore([link({ ctUserId: 100, ehEmployeeId: "555" })]);
+    const eh = fakeEh({ "100": { status: "Complete" } });
+    const ct = fakeCt(1);
+
+    const first = await runRecheck({ eh, ct, store, adminChannelId: ADMIN_CHANNEL });
+
+    expect(first).toEqual({ status: "ok", checked: 1, resolved: 0, stillIncomplete: 0, skipped: 1 });
+    expect(store.rows.get(100)?.lastOutcome).toBe("follow_up");
+    expect(store.log).toEqual([]);
+    expect(ct.channels).toEqual([]);
+    expect(logged).toContainEqual(
+      expect.objectContaining({ evt: "message_send_failed", ctUserId: 100, notice: "resolved" }),
+    );
+
+    // The next daily run: Connecteam is back.
+    const second = await runRecheck({ eh, ct, store, adminChannelId: ADMIN_CHANNEL });
+
+    expect(second).toEqual({ status: "ok", checked: 1, resolved: 1, stillIncomplete: 0, skipped: 0 });
+    expect(store.rows.get(100)?.lastOutcome).toBe("resolved");
+    expect(store.log.map((l) => l.outcome)).toEqual(["resolved"]);
+    expect(ct.channels).toHaveLength(1);
   });
 });

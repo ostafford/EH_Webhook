@@ -18,7 +18,8 @@
  *   - status no longer Incomplete -> the record resolved without a profile
  *     edit. Write a `resolved` sync_log row, flip `employee_map.last_outcome`
  *     off `follow_up` (so it drops out of the next recheck) and post a
- *     one-line resolved notice.
+ *     one-line resolved notice. The notice goes first: if it fails to send,
+ *     the row stays on `follow_up` and the next run tries again (#94).
  *   - still Incomplete -> do nothing. A changed reason-set can only be told
  *     apart from an unchanged one via `detailedStatus`, which needs a write;
  *     surfacing a new admin reason stays the job of the next real sync
@@ -28,6 +29,7 @@ import type { ConnecteamClient } from "../connecteam/client.js";
 import type { EhPayrollClient } from "../eh/client.js";
 import type { RecheckGateway } from "../sync/gateway.js";
 import { resolvedNoticeMessage, type PersonRef } from "../sync/messages.js";
+import { logEvent } from "../log.js";
 
 export interface RecheckDeps {
   eh: Pick<EhPayrollClient, "getByExternalId">;
@@ -54,7 +56,10 @@ export interface RecheckResult {
   resolved: number;
   /** Rows still Incomplete: left untouched. */
   stillIncomplete: number;
-  /** Rows skipped this run (EH lookup failed, or the record has vanished). */
+  /**
+   * Rows skipped this run, left as they were for the next run: the EH lookup
+   * failed, the record has vanished, or the resolved notice failed to send.
+   */
   skipped: number;
 }
 
@@ -91,6 +96,27 @@ export async function runRecheck(deps: RecheckDeps): Promise<RecheckResult> {
       continue;
     }
 
+    // Notice first, then mark resolved (issue #94): a failed send leaves the
+    // row on `follow_up`, so the next daily run checks it and tries again. If
+    // the send works but the save below fails, tomorrow re-sends the notice -
+    // a harmless repeat for admins, chosen over adding a claim.
+    const person = await personRef(deps.ct, link.ctUserId);
+    const sent = await deps.ct.sendChannelMessage(
+      deps.adminChannelId,
+      resolvedNoticeMessage(person, status ?? "Complete"),
+    );
+    if (sent.outcome !== "ok") {
+      logEvent({
+        evt: "message_send_failed",
+        ctUserId: link.ctUserId,
+        notice: "resolved",
+        outcome: sent.outcome,
+        status: sent.status,
+      });
+      skipped++;
+      continue;
+    }
+
     resolved++;
     await deps.store.saveEmployeeLink({
       ctUserId: link.ctUserId,
@@ -105,11 +131,6 @@ export async function runRecheck(deps: RecheckDeps): Promise<RecheckResult> {
       outcome: "resolved",
       detail: `resolved: status now "${status ?? "(unknown)"}"`,
     });
-    const person = await personRef(deps.ct, link.ctUserId);
-    await deps.ct.sendChannelMessage(
-      deps.adminChannelId,
-      resolvedNoticeMessage(person, status ?? "Complete"),
-    );
   }
 
   return { status: "ok", checked: links.length, resolved, stillIncomplete, skipped };
