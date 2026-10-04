@@ -78,6 +78,11 @@ export interface SyncGateway extends CycleStore {
    * got merged into one EH record.
    */
   findByEhEmployeeId(ehEmployeeId: string): Promise<number | null>;
+  /**
+   * The `detail` of this person's newest `correction` audit row, or null. The
+   * "that's fixed" success message (#71) reads what the Correction named.
+   */
+  latestCorrectionDetail(ctUserId: number): Promise<string | null>;
   /** Add `delta` to an operational counter for /health (queue backlog etc.). */
   bumpCounter(key: string, delta: number): Promise<void>;
   /** Read named `sync_meta` counters/markers; missing keys come back as 0. */

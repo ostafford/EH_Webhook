@@ -37,3 +37,13 @@ describe("loadFieldMap", () => {
     }
   });
 });
+
+describe("messages.employeeSuccess (issue #71)", () => {
+  it("defaults on when a client's map leaves it out", () => {
+    expect(loadFieldMap("_example").messages.employeeSuccess).toBe(true);
+  });
+
+  it("is off for the live client (clients/self) until switched on deliberately", () => {
+    expect(loadFieldMap("self").messages.employeeSuccess).toBe(false);
+  });
+});

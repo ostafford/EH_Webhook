@@ -8,6 +8,9 @@ import {
   friendlyLine,
   GENERIC_CORRECTION,
   personLabel,
+  correctionTopics,
+  firstSyncMessage,
+  correctionFixedMessage,
 } from "../src/sync/messages.js";
 import type { EhFieldError } from "../src/eh/errors.js";
 
@@ -181,5 +184,53 @@ describe("length clamping", () => {
     const msg = correctionMessage(many);
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg.endsWith("…")).toBe(true);
+  });
+});
+
+describe("employee success messages (issue #71)", () => {
+  const err = (field: string, reason = "invalid"): EhFieldError => ({ field, reason });
+
+  it("first sync says the details were received in Employment Hero", () => {
+    expect(firstSyncMessage()).toBe("Thanks, your details have now been received in Employment Hero.");
+  });
+
+  it("a fix names the topics the Correction asked about, in the order asked", () => {
+    const topics = correctionTopics([err("bankAccounts[0].bsb"), err("taxFileNumber")]);
+    expect(topics).toEqual(["bank details", "tax file number"]);
+    expect(correctionFixedMessage(topics)).toBe(
+      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.",
+    );
+  });
+
+  it("agrees the verb with a single singular topic", () => {
+    expect(correctionFixedMessage(["tax file number"])).toBe(
+      "Thanks, that's fixed: your tax file number has now been updated in Employment Hero.",
+    );
+    expect(correctionFixedMessage(["bank details"])).toBe(
+      "Thanks, that's fixed: your bank details have now been updated in Employment Hero.",
+    );
+  });
+
+  it("lists three or more topics with commas", () => {
+    expect(correctionFixedMessage(["address", "email address", "super details"])).toBe(
+      "Thanks, that's fixed: your address, email address and super details have now been updated in Employment Hero.",
+    );
+  });
+
+  it("collapses fields that share a topic, and falls back to 'details' when none is known", () => {
+    expect(correctionTopics([err("bankAccounts[0].bsb"), err("bankAccounts[0].accountNumber")])).toEqual([
+      "bank details",
+    ]);
+    expect(correctionTopics([err("residentialPostCode"), err("residentialSuburb")])).toEqual(["address"]);
+    expect(correctionTopics([err("somethingUnheardOf", "odd")])).toEqual([]);
+    expect(correctionFixedMessage([])).toBe(
+      "Thanks, that's fixed: your details have now been updated in Employment Hero.",
+    );
+  });
+
+  it("never claims the record is Complete (an Incomplete record awaiting an admin is still a success)", () => {
+    for (const text of [firstSyncMessage(), correctionFixedMessage(["bank details"]), correctionFixedMessage([])]) {
+      expect(text).not.toMatch(/complete/i);
+    }
   });
 });
