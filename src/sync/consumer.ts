@@ -23,6 +23,7 @@ import { applyFieldMap, type ConnecteamUser as MappingUser } from "../mapping/ap
 import type { ConnecteamClient } from "../connecteam/client.js";
 import type { CtResult, PayRate } from "../connecteam/types.js";
 import type { EhPayrollClient } from "../eh/client.js";
+import type { EhEmployee } from "../eh/types.js";
 import {
   decide,
   compareReadBack,
@@ -144,7 +145,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     }
   }
 
-  const mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap, { payRate });
+  let mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap, { payRate });
   const hash = await payloadHash(mapped.payload);
 
   // Identical to the state we last processed. Connecteam fires one webhook per
@@ -159,6 +160,19 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
 
   let ehEmployeeId = link?.ehEmployeeId ?? undefined;
   let decision: SyncDecision;
+
+  // Re-map against EH's current record (issue #102): a pay-run value EH
+  // already holds counts as set, and a `defaults` value it holds is left off
+  // the write, so one set by hand in EH survives. The upsert reuses this
+  // lookup, so it costs no extra call. The hash above stays EH-independent.
+  let current: EhEmployee | null | undefined;
+  if (mapped.issues.length === 0) {
+    const found = await deps.eh.getByExternalId(mapped.externalId);
+    if (found.outcome === "retryable") return { status: "retry", reason: `employment hero unavailable: ${found.detail}` };
+    if (found.outcome !== "ok") return { status: "retry", reason: `employment hero error ${found.status}` };
+    current = found.data;
+    mapped = applyFieldMap(user as unknown as MappingUser, deps.fieldMap, { payRate, ehRecord: current });
+  }
 
   if (mapped.issues.length > 0) {
     // The payload never leaves the Worker - the employee must fix it first.
@@ -182,7 +196,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     // Match order: stored link -> externalId (both handled by upsertByExternalId).
     // Email fallback for the very first match is deferred - it needs an EH
     // employee-search endpoint that issue #2 did not build/verify.
-    const write = await deps.eh.upsertByExternalId(mapped.externalId, mapped.payload);
+    const write = await deps.eh.upsertByExternalId(mapped.externalId, mapped.payload, current);
     if (write.outcome === "retryable") return { status: "retry", reason: `employment hero unavailable: ${write.detail}` };
     if (write.outcome === "client_error") return { status: "retry", reason: `employment hero error ${write.status}` };
 

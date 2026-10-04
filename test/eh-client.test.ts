@@ -93,6 +93,18 @@ describe("EhPayrollClient.upsertByExternalId", () => {
     expect(r).toMatchObject({ outcome: "ok", data: { id: 987, created: false, status: "Active" } });
   });
 
+  it("uses a record already in hand instead of looking it up again (#102)", async () => {
+    const f = fakeFetch({
+      "PUT /employee/unstructured/987": { status: 200, body: { id: 987, status: "Active", detailedStatus: null, operationType: null } },
+      "POST /employee/unstructured": { status: 201, body: CREATE_ENVELOPE },
+    });
+    const c = new EhPayrollClient(cfg(f));
+    expect(await c.upsertByExternalId("17760356", { surname: "X" }, EMP)).toMatchObject({ data: { created: false } });
+    expect(await c.upsertByExternalId("17760356", { surname: "X" }, null)).toMatchObject({ data: { created: true } });
+    const methods = (f as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([, init]) => init.method);
+    expect(methods).toEqual(["PUT", "POST"]); // no GET
+  });
+
   it("surfaces a 400 validation body as a parsed validation result and does not throw", async () => {
     const f = fakeFetch({
       "GET /externalid/17760356": { status: 404 },
