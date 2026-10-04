@@ -200,12 +200,17 @@ export type FieldRule = z.infer<typeof fieldRule>;
 export type Rules = z.infer<typeof rules>;
 export type TransformName = z.infer<typeof transform>;
 
+/** Each schema problem as `path: message`; empty when the map is valid. */
+export function fieldMapIssues(json: unknown): string[] {
+  const result = fieldMap.safeParse(json);
+  if (result.success) return [];
+  return result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
+}
+
 export function parseFieldMap(json: unknown): FieldMap {
   const result = fieldMap.safeParse(json);
   if (!result.success) {
-    const lines = result.error.issues.map(
-      (i) => `  ${i.path.join(".") || "(root)"}: ${i.message}`,
-    );
+    const lines = fieldMapIssues(json).map((l) => `  ${l}`);
     throw new Error(`Invalid field-map:\n${lines.join("\n")}`);
   }
   return result.data;

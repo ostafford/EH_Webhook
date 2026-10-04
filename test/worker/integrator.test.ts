@@ -1,3 +1,6 @@
+// The Worker loads clients/self/field-map.json (FIELD_MAP_CLIENT is blank), so
+// this fails while a client's map is mid-tuning. The wizard checks the map with
+// `npm run validate-field-map` instead (issue #56).
 import { env, createExecutionContext, createMessageBatch } from "cloudflare:test";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import worker from "../../src/index.js";

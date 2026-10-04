@@ -244,7 +244,20 @@ in EH by hand (records stay `Incomplete`). One value applies to every employee
 (per-employee settings: #75). Re-run it any time; Enter keeps the current
 choice.
 
-`npm test` fails fast on an invalid map.
+**Check the map while you tune it:**
+
+```bash
+npm run validate-field-map -- --client self
+```
+
+It checks only the map against the schema the Worker uses, and lists each
+problem by path (for example `rules.taxDeclaration.claimTaxFreeThreshold:
+Required`). The wizard's "Field map" stage runs it and loops until it passes.
+
+`npm test` also fails on an invalid map, but use it as the final gate, not
+while tuning: some tests load `clients/self/field-map.json` as a fixture
+(`test/field-map-loader.test.ts` and the Worker tests in `test/worker/`), so an
+unfinished map fails them as well, with unrelated output.
 
 ---
 

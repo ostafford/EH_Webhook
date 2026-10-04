@@ -245,6 +245,19 @@ run_tests() {
   fi
 }
 
+# check_field_map: validate clients/self/field-map.json on its own (#56) and
+# loop until it passes, showing only the map's problems - not a test report.
+# run_tests stays the final gate.
+check_field_map() {
+  local out
+  until out=$(npm run --silent validate-field-map -- --client self 2>&1); do
+    printf '%s\n' "$out" | sed 's/^/  /'
+    note "Fix these in clients/self/field-map.json (RUNBOOK step 4 explains each part)."
+    confirm "Check the field map again?" || { fail "Stopped here. Fix the field map, then run the wizard again."; exit 1; }
+  done
+  ok "Field map is valid."
+}
+
 # set_jsonc KEY VALUE: replace the first  "KEY": "..."  in wrangler.jsonc.
 # Plain IDs / UUIDs / a workers.dev URL only - no awk-sub metacharacters.
 set_jsonc() {
@@ -575,9 +588,8 @@ if [[ "$map_status" == "changed" ]]; then
   warn "Your field map was kept, but your Connecteam fields changed since it was set up."
   todo "Copy the changes you want from clients/self/field-map.draft.json into clients/self/field-map.json (or ask your integrator)."
   pause "Press Enter when that's done."
-else
-  ok "Field map ready."
 fi
+check_field_map
 v=$(node -e "console.log((require('./clients/self/field-map.json').employmentHero||{}).businessId||'')")
 if [[ -z "$v" || "$v" == "TODO" ]]; then
   ask EH_BUSINESS_ID "Enter the Employment Hero business ID:"
