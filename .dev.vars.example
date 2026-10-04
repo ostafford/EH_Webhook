@@ -1,0 +1,26 @@
+# Copy to `.dev.vars` (git-ignored) and fill in. Used by:
+#  - `wrangler dev` (local Worker run)
+#  - the live integration tests (test/*.integration.test.ts), which self-skip
+#    if the values they need are absent.
+
+# --- Employment Hero Payroll (issue #2) ---
+EH_API_KEY=
+EH_BUSINESS_ID=
+
+# --- Connecteam (issue #3) ---
+CT_API_KEY=
+CT_WEBHOOK_SECRET=
+# Custom publisher id (Settings -> Feed settings -> Add publisher, then note the id).
+# Needed to send chat messages. Live message tests are skipped without it.
+CT_CUSTOM_PUBLISHER_ID=
+# A conversation id from GET /chat/v1/conversations - the channel that gets
+# "needs a person" and "something isn't working" alerts.
+ADMIN_CONNECTEAM_CHANNEL_ID=
+
+# --- Optional ---
+# Bearer token for GET /status and POST /status/digest (issue #44). Unset falls
+# back to CT_WEBHOOK_SECRET.
+# STATUS_TOKEN=
+# Shared secret for integrator telemetry, sent as `x-eh-sync-secret` to
+# INTEGRATOR_ALERT_URL (wrangler.jsonc). Unset = off (issue #23).
+# INTEGRATOR_ALERT_SECRET=
