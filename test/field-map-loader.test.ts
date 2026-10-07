@@ -46,7 +46,7 @@ describe("messages.employeeSuccess (issue #71)", () => {
     expect(loadFieldMap("_example").messages.employeeSuccess).toBe(true);
   });
 
-  it("is off for the live client (clients/self) until switched on deliberately", () => {
-    expect(loadFieldMap("self").messages.employeeSuccess).toBe(false);
+  it("is on for the live client (clients/self)", () => {
+    expect(loadFieldMap("self").messages.employeeSuccess).toBe(true);
   });
 });
