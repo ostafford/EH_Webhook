@@ -439,9 +439,10 @@ next_up "the sender name on the sync's messages."
 # ─────────────────────────────────────────────────────────────────────────
 stage "Connecteam: custom publisher"
 why "Every message the sync sends - to an employee or to your admins - comes" \
-    "from this sender, so it reads as \"EH Sync\" rather than one of your staff."
+    "from this sender. Its name is the first thing people see, so it should say" \
+    "the message is automated rather than from one of your staff."
 todo "In Connecteam, open Settings > Custom Publishers." \
-     "Create one called \"EH Sync\" and copy its number (the publisher ID)." \
+     "Create one called \"Employment Hero Sync (Automated)\" and copy its number (the publisher ID)." \
      "Paste it here."
 open_url "https://app.connecteam.com/#/settings"
 printf '\n'

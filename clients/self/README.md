@@ -14,6 +14,20 @@ first successful sync and when a Correction is fixed (never on an ordinary
 edit). Set it to `false`, commit and deploy to turn them off. A map without the
 `messages` line has them **on** too.
 
+**Admin success notices** are on here too (`"adminSuccess": true`): a ✅ in the
+alerts channel at the same two moments, so an admin sees each new hire land.
+On a new client's go-live, every existing approved employee syncs at once, so
+consider setting it to `false` for that first run and switching it on after.
+
+**`profilePath`** is where an employee edits their details in the Connecteam
+app. Every Correction message ends "To fix: go to <profilePath> and update
+it." Profile sections are each client's own choice, so confirm it on their app.
+
+**`automatedNote`** is the closing line on every message to an employee or
+manager, so nobody mistakes it for a colleague writing. The default ("This is
+an automated message from the Employment Hero sync.") suits any client; set
+their own wording, or `""` for none. Admin-channel messages never carry it.
+
 Running several clients from one deployment instead? Add each under
 `clients/<slug>/`, register it in `src/mapping/registry.ts`, and set
 `FIELD_MAP_CLIENT=<slug>`.

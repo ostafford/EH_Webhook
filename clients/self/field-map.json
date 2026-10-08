@@ -13,7 +13,7 @@
     "payRateTemplate": { "source": "connecteamField" }
   },
   "identity": { "externalIdFrom": "userId", "emailFallbackFrom": "email" },
-  "messages": { "employeeSuccess": true },
+  "messages": { "employeeSuccess": true, "adminSuccess": true, "profilePath": "Profile > Personal Information", "automatedNote": "This is an automated message from the Employment Hero sync." },
   "fields": [
     { "eh": "firstName", "from": { "customFieldId": 42920713 }, "transform": "trimString", "required": true },
     { "eh": "surname", "from": { "customFieldId": 42920714 }, "transform": "trimString", "required": true },

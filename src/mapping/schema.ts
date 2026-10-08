@@ -5,6 +5,12 @@
  */
 import { z } from "zod";
 
+/** Where an employee edits their details in the Connecteam app, unless a client's field map says otherwise. */
+export const DEFAULT_PROFILE_PATH = "Profile > Personal Information";
+
+/** The closing line on every message to a person, unless a client's field map says otherwise. */
+export const DEFAULT_AUTOMATED_NOTE = "This is an automated message from the Employment Hero sync.";
+
 const source = z.union([
   z.object({ customFieldId: z.number().int().positive() }).strict(),
   z
@@ -186,12 +192,27 @@ export const fieldMap = z
     /**
      * Optional employee-facing messages (issue #71). `employeeSuccess`: a one-off
      * DM on the employee's first successful sync and when a Correction is
-     * fixed. On unless a client sets it to false.
+     * fixed. On unless a client sets it to false. `adminSuccess`: a ✅ in the
+     * admin channel at those same two moments. `profilePath`: where in the
+     * Connecteam app an employee edits their details, named in every
+     * Correction message (sections are the client's own choice).
+     * `automatedNote`: the closing line on every message to an employee or
+     * manager, saying it was sent automatically; "" for none.
      */
     messages: z
-      .object({ employeeSuccess: z.boolean().default(true) })
+      .object({
+        employeeSuccess: z.boolean().default(true),
+        adminSuccess: z.boolean().default(true),
+        profilePath: z.string().trim().min(1).default(DEFAULT_PROFILE_PATH),
+        automatedNote: z.string().trim().max(120).default(DEFAULT_AUTOMATED_NOTE),
+      })
       .strict()
-      .default({ employeeSuccess: true }),
+      .default({
+        employeeSuccess: true,
+        adminSuccess: true,
+        profilePath: DEFAULT_PROFILE_PATH,
+        automatedNote: DEFAULT_AUTOMATED_NOTE,
+      }),
   })
   .strict();
 

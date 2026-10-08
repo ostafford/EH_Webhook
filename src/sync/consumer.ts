@@ -41,6 +41,8 @@ import {
   correctionTopics,
   firstSyncMessage,
   correctionFixedMessage,
+  adminFirstSyncMessage,
+  adminCorrectionFixedMessage,
   type PersonRef,
 } from "./messages.js";
 import { advanceCycle, directManagerUserId, MANAGER_ESCALATION_CYCLE } from "./cycles.js";
@@ -276,7 +278,7 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
     let escalate: boolean;
     if (await shouldPostNotice(deps.store, employeeKey, CORRECTION_NOTICE_DEDUPE_MS, now())) {
       const sent = await sendClaimed(deps.store, employeeKey, ctUserId, "correction", () =>
-        deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields)),
+        deps.ct.sendDirectMessage(ctUserId, correctionMessage(decision.fields, deps.fieldMap.messages.profilePath, deps.fieldMap.messages.automatedNote)),
       );
       if (!sent) return sendFailed("correction");
       // Bumped only once the employee has the message, so a failed send leaves
@@ -294,27 +296,39 @@ export async function runSyncJob(job: SyncJob, deps: SyncDeps): Promise<SyncJobO
       const managerKey = await noticeKey("manager_escalation", ctUserId, [hash]);
       if (await shouldPostNotice(deps.store, managerKey, CORRECTION_NOTICE_DEDUPE_MS, now())) {
         const sent = await sendClaimed(deps.store, managerKey, ctUserId, "manager_escalation", () =>
-          deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields, person)),
+          deps.ct.sendDirectMessage(managerId, managerEscalationMessage(decision.fields, person, deps.fieldMap.messages.automatedNote)),
         );
         if (!sent) return sendFailed("manager_escalation");
         managerNotified = true;
       }
     }
   } else {
-    // The employee success message (#71) goes out BEFORE advanceCycle resets
-    // the cycle, so a failed send retries with the cycle still open and picks
-    // the same wording. One claim covers both wordings: after a reset, a retry
-    // would choose the other one, and its own key would let it send twice.
-    if (deps.fieldMap.messages.employeeSuccess) {
-      const text = await successMessage(link, deps.store);
-      if (text !== null) {
-        const key = await noticeKey("employee_success", ctUserId, [hash]);
-        if (await shouldPostNotice(deps.store, key, CORRECTION_NOTICE_DEDUPE_MS, now())) {
-          const sent = await sendClaimed(deps.store, key, ctUserId, "employee_success", () =>
-            deps.ct.sendDirectMessage(ctUserId, text),
-          );
-          if (!sent) return sendFailed("employee_success");
-        }
+    // The success messages (#71) go out BEFORE advanceCycle resets the cycle,
+    // so a failed send retries with the cycle still open and picks the same
+    // wording. One claim per recipient covers both wordings: after a reset, a
+    // retry would choose the other one, and its own key would let it send twice.
+    // The employee and the admin channel each have their own claim, so a failed
+    // admin send can be retried without DMing the employee twice.
+    const { employeeSuccess, adminSuccess } = deps.fieldMap.messages;
+    const success = employeeSuccess || adminSuccess ? await successKind(link, deps.store) : null;
+    if (success && employeeSuccess) {
+      const key = await noticeKey("employee_success", ctUserId, [hash]);
+      if (await shouldPostNotice(deps.store, key, CORRECTION_NOTICE_DEDUPE_MS, now())) {
+        const sent = await sendClaimed(deps.store, key, ctUserId, "employee_success", () =>
+          deps.ct.sendDirectMessage(ctUserId, employeeSuccessText(success, deps.fieldMap.messages.automatedNote)),
+        );
+        if (!sent) return sendFailed("employee_success");
+      }
+    }
+    // A follow-up posts its own notice to the channel below, which already
+    // says the sync completed, so the ✅ is only for a clean sync.
+    if (success && adminSuccess && decision.kind === "ok") {
+      const key = await noticeKey("admin_success", ctUserId, [hash]);
+      if (await shouldPostNotice(deps.store, key, CORRECTION_NOTICE_DEDUPE_MS, now())) {
+        const sent = await sendClaimed(deps.store, key, ctUserId, "admin_success", () =>
+          deps.ct.sendChannelMessage(deps.adminChannelId, adminSuccessText(success, person)),
+        );
+        if (!sent) return sendFailed("admin_success");
       }
     }
     await advanceCycle(deps.store, ctUserId, decision);
@@ -534,25 +548,35 @@ async function sendClaimed(
 /** Outcomes that mean the person has synced successfully before. */
 const SYNCED_BEFORE: readonly SyncOutcomeLabel[] = ["ok", "follow_up", "resolved"];
 
+type SuccessKind = { kind: "first" } | { kind: "fixed"; topics: string[] };
+
 /**
- * The success message (#71) for a job that just synced successfully, judged
- * from the person's state BEFORE this job, or null for an ordinary edit:
- * - an open Correction cycle -> "that's fixed", naming what it asked about
- * - never synced before -> "received"
+ * Which success (#71) a job that just synced successfully is, judged from the
+ * person's state BEFORE this job, or null for an ordinary edit:
+ * - an open Correction cycle -> "fixed", with the topics it asked about
+ * - never synced before -> "first"
  * A row saved before `lastOutcome` existed counts as synced if it has an EH id.
  */
-async function successMessage(
+async function successKind(
   link: EmployeeLink | null,
   store: Pick<SyncGateway, "latestCorrectionDetail">,
-): Promise<string | null> {
+): Promise<SuccessKind | null> {
   if (link && link.failureCycleCount > 0) {
     const fields = correctionFieldsFromAudit(await store.latestCorrectionDetail(link.ctUserId));
-    return correctionFixedMessage(correctionTopics(fields.map((field) => ({ field, reason: "" }))));
+    return { kind: "fixed", topics: correctionTopics(fields.map((field) => ({ field, reason: "" }))) };
   }
   const syncedBefore =
     link !== null &&
     (link.lastOutcome != null ? SYNCED_BEFORE.includes(link.lastOutcome) : link.ehEmployeeId !== null);
-  return syncedBefore ? null : firstSyncMessage();
+  return syncedBefore ? null : { kind: "first" };
+}
+
+function employeeSuccessText(s: SuccessKind, note: string): string {
+  return s.kind === "first" ? firstSyncMessage(note) : correctionFixedMessage(s.topics, note);
+}
+
+function adminSuccessText(s: SuccessKind, person: PersonRef): string {
+  return s.kind === "first" ? adminFirstSyncMessage(person) : adminCorrectionFixedMessage(person, s.topics);
 }
 
 function sendFailed(notice: NoticeKind): SyncJobOutcome {

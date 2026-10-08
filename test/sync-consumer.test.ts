@@ -585,7 +585,7 @@ describe("runSyncJob - read-back mismatch", () => {
 
     expect(out.status).toBe("synced");
     // No Correction - only the first-sync success message (#71).
-    expect(ct.dms.map((d) => d.text)).toEqual(["Thanks, your details have now been received in Employment Hero."]);
+    expect(ct.dms.map((d) => d.text)).toEqual(["Thanks, your details have now been received in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
   });
 });
 
@@ -1056,7 +1056,8 @@ describe("runSyncJob - per-employee pay rate (issue #42)", () => {
 
     expect(out.status).toBe("synced");
     expect(eh.upserts).toHaveLength(1);
-    expect(ct.channels).toHaveLength(0);
+    // No follow-up notice: the only channel post is the first-sync ✅.
+    expect(ct.channels.map((c) => c.text)).toEqual([expect.stringMatching(/^✅ .* has synced to Employment Hero\.$/)]);
   });
 
   it("retries when the EH lookup before the write fails (#102)", async () => {
@@ -1116,7 +1117,7 @@ describe("retry backoff (issue #90)", () => {
 });
 
 describe("runSyncJob - employee success message (issue #71)", () => {
-  const FIRST = "Thanks, your details have now been received in Employment Hero.";
+  const FIRST = "Thanks, your details have now been received in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.";
   const nonResident = (): ConnecteamUser => {
     const u = cloneUser();
     u.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
@@ -1183,7 +1184,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
 
     expect(out.status).toBe("synced");
     expect(dmsTo(ct)).toEqual([
-      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.",
+      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.",
     ]);
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
   });
@@ -1198,7 +1199,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
 
     expect((await attempt()).status).toBe("synced");
-    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero."]);
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
   });
 
@@ -1210,7 +1211,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
 
     expect((await attempt()).status).toBe("retry");
     expect((await attempt()).status).toBe("follow_up");
-    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero."]);
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
     expect(ct.channels).toHaveLength(1);
   });
 
@@ -1248,5 +1249,75 @@ describe("runSyncJob - employee success message (issue #71)", () => {
     const out = await runSyncJob(job(), deps({ ct: ct as never, fieldMap: off }));
     expect(out.status).toBe("synced");
     expect(ct.dms).toEqual([]);
+  });
+
+  // --- admin success notice: a ✅ in the alerts channel at the same moments ---
+  const ADMIN_FIRST = "✅ Sam Rivera (17760356) has synced to Employment Hero.";
+  const channelTexts = (ct: CtFake) => ct.channels.map((c) => c.text);
+
+  it("admin ✅: first successful sync -> one post in the alerts channel", async () => {
+    const ct = fakeCt(cloneUser());
+    await runSyncJob(job(), deps({ ct: ct as never }));
+    expect(ct.channels).toEqual([{ id: "chan-1", text: ADMIN_FIRST }]);
+  });
+
+  it("admin ✅: a fixed Correction names what was fixed", async () => {
+    const store = inCorrection("bankAccounts[0].bsb, tax-file-number-is-invalid");
+    const ct = fakeCt(cloneUser());
+    await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+    expect(channelTexts(ct)).toEqual([
+      "✅ Sam Rivera (17760356) fixed their bank details and tax file number and has now synced to Employment Hero.",
+    ]);
+  });
+
+  it("admin ✅: not posted when the sync lands as a Manual follow-up (that notice is posted instead)", async () => {
+    const ct = fakeCt(nonResident());
+    expect((await runSyncJob(job(), deps({ ct: ct as never }))).status).toBe("follow_up");
+    expect(ct.channels).toHaveLength(1);
+    expect(channelTexts(ct)[0]).not.toMatch(/^✅/);
+  });
+
+  it("admin ✅: an ordinary edit after a successful sync posts nothing", async () => {
+    const store = fakeGateway({ ctUserId: 17760356, ehEmployeeId: "987", lastPayloadHash: "old" });
+    store.rows.get(17760356)!.lastOutcome = "ok";
+    const ct = fakeCt(cloneUser());
+    await runSyncJob(job({ eventTimestamp: 2000 }), deps({ store, ct: ct as never }));
+    expect(ct.channels).toEqual([]);
+  });
+
+  it("admin ✅: a failed post retries without DMing the employee twice, then posts once", async () => {
+    const store = fakeGateway();
+    const ct = fakeCt(cloneUser());
+    ct.failSends.set("chan-1", 1);
+    const attempt = () => runSyncJob(job(), deps({ store, ct: ct as never }));
+
+    expect((await attempt()).status).toBe("retry");
+    expect((await attempt()).status).toBe("synced");
+    expect(dmsTo(ct)).toEqual([FIRST]);
+    expect(channelTexts(ct)).toEqual([ADMIN_FIRST]);
+  });
+
+  it("admin ✅: each setting switches off only its own message", async () => {
+    const noAdmin = parseFieldMap({ ...fieldMap, messages: { adminSuccess: false } });
+    const a = fakeCt(cloneUser());
+    await runSyncJob(job(), deps({ ct: a as never, fieldMap: noAdmin }));
+    expect(dmsTo(a)).toEqual([FIRST]);
+    expect(a.channels).toEqual([]);
+
+    const noEmployee = parseFieldMap({ ...fieldMap, messages: { employeeSuccess: false } });
+    const b = fakeCt(cloneUser());
+    await runSyncJob(job(), deps({ ct: b as never, fieldMap: noEmployee }));
+    expect(b.dms).toEqual([]);
+    expect(channelTexts(b)).toEqual([ADMIN_FIRST]);
+  });
+
+  it("the Correction message names the client's own profile path", async () => {
+    const custom = parseFieldMap({ ...fieldMap, messages: { profilePath: "Profile > Payroll Details" } });
+    const ct = fakeCt(cloneUser());
+    const eh = fakeEh({
+      write: { outcome: "validation", status: 400, issues: [{ field: "taxFileNumber", reason: "invalid" }] },
+    });
+    await runSyncJob(job(), deps({ ct: ct as never, eh, fieldMap: custom }));
+    expect(dmsTo(ct)[0]).toContain("To fix: go to Profile > Payroll Details and update it.");
   });
 });

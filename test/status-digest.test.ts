@@ -32,13 +32,13 @@ describe("digestMessages", () => {
         "Employment Hero sync status: 3 of 4 employees need attention.",
         "",
         "Waiting on employee:",
-        "- Connecteam user 4 — taxFileNumber; bsb",
+        "• Connecteam user 4 — taxFileNumber; bsb",
         "",
         "Waiting on admin:",
-        "- Ada Lovelace (3) — Pay Run Defaults are incomplete",
+        "• Ada Lovelace (3) — Pay Run Defaults are incomplete",
         "",
         "Broken:",
-        "- Connecteam user 2 — retries exhausted",
+        "• Connecteam user 2 — retries exhausted",
       ].join("\n"),
     );
   });

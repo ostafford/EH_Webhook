@@ -52,7 +52,7 @@ export function digestMessages(employees: readonly DigestEmployee[], totalCount:
     lines.push("", `${STATE_LABEL[state]}:`);
     for (const e of group) {
       const reason = e.reasons.join("; ") || "see the audit log";
-      lines.push(`- ${who(e)} — ${reason}`);
+      lines.push(`• ${who(e)} — ${reason}`);
     }
   }
   return chunk(lines);
