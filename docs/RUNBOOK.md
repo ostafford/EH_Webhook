@@ -285,28 +285,58 @@ npx wrangler whoami          # confirm it's the right account
 
 # Provision (one D1 database, two queues)
 npx wrangler d1 create eh-webhook
-#   → put the returned database_id into wrangler.jsonc  d1_databases[0].database_id
-npx wrangler d1 migrations apply eh-webhook --remote
+#   → add the returned id to .dev.vars as  D1_DATABASE_ID=<id>
 npx wrangler queues create eh-webhook-sync
 npx wrangler queues create eh-webhook-dlq
 
+# Vars - in .dev.vars (git-ignored), NOT in wrangler.jsonc:
+#   EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID,
+#   ADMIN_CONNECTEAM_CHANNEL_ID; optional STATUS_DIGEST_DAY (blank = Monday),
+#   INTEGRATOR_ALERT_URL, INTEGRATOR_CLIENT_ID. Then build the deploy config:
+npm run deploy:config -- --check-live
+npx wrangler d1 migrations apply eh-webhook --remote --config wrangler.deploy.json
+
 # Secrets
-npx wrangler secret put CT_API_KEY
-npx wrangler secret put EH_API_KEY
-npx wrangler secret put CT_WEBHOOK_SECRET
+npx wrangler secret put CT_API_KEY --config wrangler.deploy.json
+npx wrangler secret put EH_API_KEY --config wrangler.deploy.json
+npx wrangler secret put CT_WEBHOOK_SECRET --config wrangler.deploy.json
 # Optional: a dedicated bearer token for GET /status and POST /status/digest
 # (see "Sync-status roster" below). Unset falls back to CT_WEBHOOK_SECRET.
-npx wrangler secret put STATUS_TOKEN
-
-# Vars — set in wrangler.jsonc "vars" (leave FIELD_MAP_CLIENT blank):
-#   EH_BUSINESS_ID, CT_ONBOARDING_PACK_ID, CT_CUSTOM_PUBLISHER_ID,
-#   ADMIN_CONNECTEAM_CHANNEL_ID, STATUS_DIGEST_DAY (blank = Monday)
+npx wrangler secret put STATUS_TOKEN --config wrangler.deploy.json
 
 # Verify, then deploy
 npm run typecheck && npm test
-npx wrangler deploy
+npm run deploy
 curl https://<worker>.workers.dev/health
 ```
+
+### Where the deployment's values live
+
+`wrangler.jsonc` is the **template**, the same for every client: its vars are
+blank and its `database_id` is a placeholder. **Don't put real values in it,
+and don't deploy it directly.** Each deployment's own values live in the
+git-ignored `.dev.vars` (the wizard writes them; `D1_DATABASE_ID` is the
+database). `npm run deploy` runs `scripts/deploy-config.ts`, which builds
+`wrangler.deploy.json` (also git-ignored) from the two, then deploys that.
+
+Why: values kept in the tracked `wrangler.jsonc` were silently reset to the
+blank template by ordinary git use (a branch switch, a discard, a pull), and a
+plain `wrangler deploy` then pushed blank settings and a dead database id to
+the live Worker. A file git ignores can't be reset that way.
+
+Before a deploy changes anything, `deploy:config --check-live` refuses when:
+
+- `.dev.vars` is missing the database id or a required var (it names each);
+- that database isn't on the Cloudflare account wrangler is logged in to
+  (wrong account, or a stale id);
+- the deploy would point the live Worker at a **different** database
+  (`--allow-database-change` for a deliberate move).
+
+It lists, without blocking, any setting the deploy would change on the live
+Worker. A raw `npx wrangler deploy` of the template fails on its placeholder
+`database_id`. Any other remote command that looks up the database by name
+(`d1 migrations`, `d1 export`, `d1 execute`) also takes
+`--config wrangler.deploy.json`.
 
 The Worker's URL is a free `*.workers.dev` address by default — nothing to set
 up. To serve it from the client's own domain instead, add a route / custom domain
@@ -631,8 +661,10 @@ classification arrives as a new option, so admins should move affected
 employees to it.
 
 ### Rotating keys
-`npx wrangler secret put CT_API_KEY` / `EH_API_KEY` / `CT_WEBHOOK_SECRET` /
-`STATUS_TOKEN` with the new value, then rotate the far side. `CT_WEBHOOK_SECRET`
+`npx wrangler secret put CT_API_KEY --config wrangler.deploy.json` (likewise
+`EH_API_KEY` / `CT_WEBHOOK_SECRET` / `STATUS_TOKEN`) with the new value, then
+rotate the far side. Run `npm run deploy:config` first if `wrangler.deploy.json`
+isn't there. A key kept locally for testing also lives in `.dev.vars`. `CT_WEBHOOK_SECRET`
 must be updated on the Connecteam webhook registration at the same time.
 
 ---
@@ -643,8 +675,10 @@ must be updated on the Connecteam webhook registration at the same time.
 ./scripts/update.sh
 ```
 
-`git pull` → `npm ci` → `npm test` → `wrangler d1 migrations apply --remote` →
-`wrangler deploy` → `/health` check. Fails loudly on any step. Run by the client's
+`git pull` → `npm ci` → `npm test` → `deploy:config --check-live` (see §5,
+"Where the deployment's values live") → `wrangler d1 migrations apply --remote`
+→ `wrangler deploy` → `/health` check. Fails loudly on any step; the check
+stops it before anything on Cloudflare changes. Run by the client's
 IT, or by the integrator on a support call. A non-technical owner should not run
 this unaided.
 
@@ -669,7 +703,7 @@ Employment Hero accounts) is steps 1–7. **Removing for good** adds step 8.
    only, never employee values, but it's the only history of who synced when:
 
    ```bash
-   npx wrangler d1 export eh-webhook --remote --output=eh-webhook-backup.sql
+   npm run deploy:config && npx wrangler d1 export eh-webhook --remote --output=eh-webhook-backup.sql --config wrangler.deploy.json
    ```
 
 2. **Delete the Connecteam webhook first**, so Connecteam stops posting to a
@@ -728,7 +762,8 @@ Employment Hero accounts) is steps 1–7. **Removing for good** adds step 8.
    ```
 
    A wizard re-run creates a fresh database and writes its id into
-   `wrangler.jsonc`. On the manual path, replace `database_id` yourself (§5).
+   `.dev.vars` (`D1_DATABASE_ID`). On the manual path, replace it yourself (§5).
+   The next deploy would otherwise stop, saying the database isn't on the account.
 
 7. **The GitHub health watch.** `.github/workflows/health-watch.yml`
    polls `/health` every 10 minutes and emails on failure, so once the Worker

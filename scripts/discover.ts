@@ -179,7 +179,7 @@ async function main(): Promise<void> {
   // several clients (a slug other than "self"); a single-client setup leaves
   // FIELD_MAP_CLIENT blank (docs/RUNBOOK.md).
   const multiTenant = client !== "self";
-  console.log("\nConfiguration checklist (wrangler.jsonc vars + secrets):");
+  console.log("\nConfiguration checklist (.dev.vars values + secrets; never wrangler.jsonc):");
   if (multiTenant) console.log(line("FIELD_MAP_CLIENT", client));
   console.log(line("EH_BUSINESS_ID", businessId || "TODO  (GET /api/v2/business)"));
   console.log(line("CT_ONBOARDING_PACK_ID", String(packId)));

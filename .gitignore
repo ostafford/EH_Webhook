@@ -9,6 +9,8 @@ worker-configuration.d.ts
 
 # secrets & local config — NEVER commit
 .dev.vars
+# built from wrangler.jsonc + .dev.vars on every deploy (scripts/deploy-config.ts)
+wrangler.deploy.json
 .dev.vars.*
 # ...except the placeholder-only examples, at any depth (root + integrator-relay) (#60)
 !.dev.vars.example

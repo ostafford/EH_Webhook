@@ -6,7 +6,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
 
-  // Non-secret, per-deployment. Fill these from the client's accounts (see docs/RUNBOOK.md).
+  // TEMPLATE - leave the per-deployment values below blank here. Each deployment's
+  // own values live in the git-ignored .dev.vars (the wizard writes them), and
+  // `npm run deploy` builds wrangler.deploy.json from this file plus .dev.vars.
+  // Never deploy this file directly: its database_id is a placeholder on purpose,
+  // so a raw `wrangler deploy` fails before it can blank a live Worker's settings.
   // Secrets are set with `wrangler secret put`: CT_API_KEY, EH_API_KEY, CT_WEBHOOK_SECRET,
   // and optionally STATUS_TOKEN (see below).
   "vars": {
@@ -33,7 +37,7 @@
     {
       "binding": "DB",
       "database_name": "eh-webhook",
-      "database_id": "2da451a0-fb39-477c-b076-69078b174924",
+      "database_id": "set-D1_DATABASE_ID-in-.dev.vars",
       "migrations_dir": "migrations"
     }
   ],

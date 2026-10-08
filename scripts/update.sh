@@ -21,11 +21,17 @@ npm ci
 echo "▸ running the test suite"
 npm test
 
+# The deploy config comes from wrangler.jsonc + .dev.vars, checked against the
+# Cloudflare account and the live Worker before anything changes. Never
+# deploy wrangler.jsonc itself: it is the blank template.
+echo "▸ building the deploy config and checking it against the live Worker"
+npm run --silent deploy:config -- --check-live
+
 echo "▸ applying new D1 migrations (remote)"
-npx --yes wrangler d1 migrations apply eh-webhook --remote
+npx --yes wrangler d1 migrations apply eh-webhook --remote --config wrangler.deploy.json
 
 echo "▸ deploying"
-deploy_out=$(npx --yes wrangler deploy 2>&1)
+deploy_out=$(npx --yes wrangler deploy --config wrangler.deploy.json 2>&1)
 printf '%s\n' "$deploy_out"
 
 url=$(printf '%s' "$deploy_out" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1)
