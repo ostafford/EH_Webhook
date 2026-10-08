@@ -1,0 +1,160 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import {
+  DATABASE_ID_KEY,
+  DATABASE_ID_PLACEHOLDER,
+  DEPLOY_CONFIG_PATH,
+  REQUIRED_VARS,
+  compareWithLive,
+  parseDevVars,
+  renderDeployConfig,
+  stripJsonc,
+  type LiveBinding,
+} from "../scripts/lib/deploy-config.js";
+
+const read = (p: string) => readFileSync(p, "utf8");
+const template = read("wrangler.jsonc");
+
+const goodVars = {
+  [DATABASE_ID_KEY]: "11111111-2222-3333-4444-555555555555",
+  EH_BUSINESS_ID: "555455",
+  CT_ONBOARDING_PACK_ID: "5474",
+  CT_CUSTOM_PUBLISHER_ID: "2505336",
+  ADMIN_CONNECTEAM_CHANNEL_ID: "chan-1",
+  CT_API_KEY: "secret-never-copied",
+};
+
+describe("stripJsonc", () => {
+  it("drops comments and trailing commas but not // inside a string", () => {
+    const text = '{\n  // a comment\n  "url": "https://x.dev", /* block */\n  "a": [1, 2,],\n}';
+    expect(JSON.parse(stripJsonc(text))).toEqual({ url: "https://x.dev", a: [1, 2] });
+  });
+
+  it("parses the real wrangler.jsonc", () => {
+    expect(() => JSON.parse(stripJsonc(template))).not.toThrow();
+  });
+});
+
+describe("parseDevVars", () => {
+  it("reads KEY=VALUE, skipping comments and blanks, removing quotes", () => {
+    expect(parseDevVars('# c\n\nA=1\nB="two"\nC=a=b\n  D = x \n')).toEqual({ A: "1", B: "two", C: "a=b", D: "x" });
+  });
+});
+
+describe("renderDeployConfig", () => {
+  it("fills the database id and every template var that .dev.vars has", () => {
+    const r = renderDeployConfig(template, goodVars);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.config.d1_databases?.[0]?.database_id).toBe(goodVars[DATABASE_ID_KEY]);
+    expect(r.vars).toMatchObject({ EH_BUSINESS_ID: "555455", ADMIN_CONNECTEAM_CHANNEL_ID: "chan-1" });
+    expect(r.vars.STATUS_DIGEST_DAY).toBe(""); // not in .dev.vars -> the template's value
+  });
+
+  it("never copies a secret into the config", () => {
+    const r = renderDeployConfig(template, goodVars);
+    expect(JSON.stringify(r)).not.toContain("secret-never-copied");
+  });
+
+  it("keeps everything else in the template as it is (queues, crons, flags)", () => {
+    const r = renderDeployConfig(template, goodVars);
+    if (!r.ok) throw new Error("render failed");
+    const t = JSON.parse(stripJsonc(template));
+    for (const key of ["name", "main", "compatibility_date", "compatibility_flags", "queues", "triggers"]) {
+      expect(r.config[key]).toEqual(t[key]);
+    }
+  });
+
+  it("refuses, naming each one, when the database id or a required var is missing", () => {
+    const { [DATABASE_ID_KEY]: _db, CT_CUSTOM_PUBLISHER_ID: _pub, ...rest } = goodVars;
+    expect(renderDeployConfig(template, { ...rest, EH_BUSINESS_ID: "  " })).toEqual({
+      ok: false,
+      missing: [DATABASE_ID_KEY, "EH_BUSINESS_ID", "CT_CUSTOM_PUBLISHER_ID"],
+    });
+  });
+
+  it("treats the template's placeholder as missing", () => {
+    const r = renderDeployConfig(template, { ...goodVars, [DATABASE_ID_KEY]: DATABASE_ID_PLACEHOLDER });
+    expect(r).toEqual({ ok: false, missing: [DATABASE_ID_KEY] });
+  });
+});
+
+describe("compareWithLive", () => {
+  const rendered = { databaseId: "db-new", vars: { EH_BUSINESS_ID: "555455", ADMIN_CONNECTEAM_CHANNEL_ID: "chan-2" } };
+  const live: LiveBinding[] = [
+    { name: "DB", type: "d1", database_id: "db-new" },
+    { name: "EH_BUSINESS_ID", type: "plain_text", text: "555455" },
+    { name: "ADMIN_CONNECTEAM_CHANNEL_ID", type: "plain_text", text: "chan-1" },
+    { name: "CT_API_KEY", type: "secret_text" },
+  ];
+
+  it("lists only the settings that change; secrets are never compared", () => {
+    expect(compareWithLive(rendered, live)).toEqual({
+      databaseChange: null,
+      varChanges: [{ name: "ADMIN_CONNECTEAM_CHANNEL_ID", live: "chan-1", next: "chan-2" }],
+    });
+  });
+
+  it("flags a different database", () => {
+    const moved = live.map((b) => (b.type === "d1" ? { ...b, database_id: "db-old" } : b));
+    expect(compareWithLive(rendered, moved).databaseChange).toEqual({ live: "db-old", next: "db-new" });
+  });
+});
+
+// The wizard, update.sh, `npm run deploy`, the runbook and the template must all
+// agree on where a deployment's values live. A slip in any one of them brings
+// back the deploy that blanks a live Worker's settings.
+describe("every deploy path uses the built config, never the template", () => {
+  const CFG = `--config ${DEPLOY_CONFIG_PATH}`;
+  const wizard = read("scripts/setup-wizard.sh");
+  const update = read("scripts/update.sh");
+  const runbookCode = [...read("docs/RUNBOOK.md").matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]).join("\n");
+
+  /** Lines that run a wrangler command which reads the config's database or deploys. */
+  const configReaders = (text: string) =>
+    text
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("#"))
+      .filter((l) => /wrangler(?:["' ]| \S+ )*(deploy\b(?! --dry-run)|d1 (migrations|export|execute)|secret put)|wr_quiet (deploy|d1 migrations)/.test(l));
+
+  it("the template holds no deployment's values", () => {
+    const t = JSON.parse(stripJsonc(template));
+    expect(t.d1_databases[0].database_id).toBe(DATABASE_ID_PLACEHOLDER);
+    for (const key of REQUIRED_VARS) expect(t.vars[key]).toBe("");
+  });
+
+  it("git ignores the values and the built config", () => {
+    const ignored = read(".gitignore").split("\n");
+    expect(ignored).toContain(".dev.vars");
+    expect(ignored).toContain(DEPLOY_CONFIG_PATH);
+  });
+
+  it("npm run deploy checks against the live Worker, then deploys the built config", () => {
+    const scripts = JSON.parse(read("package.json")).scripts;
+    expect(scripts.deploy).toBe(`tsx scripts/deploy-config.ts --check-live && wrangler deploy ${CFG}`);
+  });
+
+  it("update.sh checks before it touches the database, and uses the built config", () => {
+    expect(update.indexOf("deploy:config -- --check-live")).toBeGreaterThan(-1);
+    expect(update.indexOf("deploy:config -- --check-live")).toBeLessThan(update.indexOf("d1 migrations apply"));
+    expect(configReaders(update).length).toBeGreaterThanOrEqual(2);
+    for (const line of configReaders(update)) expect(line).toContain(CFG);
+  });
+
+  it("the wizard saves values to .dev.vars only, and its remote commands use the built config", () => {
+    expect(wizard).not.toMatch(/set_jsonc|^save .* jsonc$/m);
+    expect(wizard).toContain(`write_env ${DATABASE_ID_KEY} "$db_id"`);
+    expect(configReaders(wizard).length).toBeGreaterThanOrEqual(4);
+    for (const line of configReaders(wizard)) expect(line).toContain(CFG);
+  });
+
+  it("the runbook's commands use the built config", () => {
+    expect(runbookCode).not.toMatch(/^npx wrangler deploy\s*$/m);
+    for (const line of configReaders(runbookCode)) expect(line).toContain(CFG);
+  });
+
+  it(".dev.vars.example lists every value a deploy needs", () => {
+    const example = read(".dev.vars.example");
+    for (const key of [DATABASE_ID_KEY, ...REQUIRED_VARS]) expect(example).toMatch(new RegExp(`^${key}=`, "m"));
+  });
+});

@@ -1,7 +1,13 @@
 # Copy to `.dev.vars` (git-ignored) and fill in. Used by:
+#  - `npm run deploy` / scripts/update.sh: this deployment's own values, filled
+#    into the blank wrangler.jsonc template (scripts/deploy-config.ts)
 #  - `wrangler dev` (local Worker run)
 #  - the live integration tests (test/*.integration.test.ts), which self-skip
 #    if the values they need are absent.
+
+# --- Cloudflare ---
+# This deployment's D1 database id (`npx wrangler d1 list`, the eh-webhook row).
+D1_DATABASE_ID=
 
 # --- Employment Hero Payroll (issue #2) ---
 EH_API_KEY=
@@ -10,6 +16,8 @@ EH_BUSINESS_ID=
 # --- Connecteam (issue #3) ---
 CT_API_KEY=
 CT_WEBHOOK_SECRET=
+# The onboarding pack whose approval triggers the first sync.
+CT_ONBOARDING_PACK_ID=
 # Custom publisher id (Settings -> Feed settings -> Add publisher, then note the id).
 # Needed to send chat messages. Live message tests are skipped without it.
 CT_CUSTOM_PUBLISHER_ID=
@@ -18,6 +26,9 @@ CT_CUSTOM_PUBLISHER_ID=
 ADMIN_CONNECTEAM_CHANNEL_ID=
 
 # --- Optional ---
+# STATUS_DIGEST_DAY=
+# INTEGRATOR_ALERT_URL=
+# INTEGRATOR_CLIENT_ID=
 # Bearer token for GET /status and POST /status/digest (issue #44). Unset falls
 # back to CT_WEBHOOK_SECRET.
 # STATUS_TOKEN=

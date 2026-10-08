@@ -223,12 +223,13 @@ fail() { printf '  %s✗ %s%s\n' "$RED" "$1" "$RESET"; }
 # next_up "text": how this stage leads into the next one.
 next_up() { printf '\n  %sNext: %s%s\n' "$DIM" "$1" "$RESET"; }
 
-# save KEY VALUE "label" [jsonc]: store a value (and, with "jsonc", the
-# wrangler.jsonc var of the same name) behind one plain line. The file names
-# stay in the end-of-wizard summary for the integrator.
+# save KEY VALUE "label": store a value in .dev.vars behind one plain line.
+# Deploys read it from there (`npm run deploy:config` builds
+# wrangler.deploy.json from wrangler.jsonc + .dev.vars); wrangler.jsonc itself
+# stays the blank template, so git can never reset a live value. The file
+# names stay in the end-of-wizard summary for the integrator.
 save() {
   write_env "$1" "$2" >/dev/null
-  if [[ "${4:-}" == "jsonc" ]]; then set_jsonc "$1" "$2" >/dev/null; fi
   ok "Saved $3."
 }
 
@@ -258,18 +259,6 @@ check_field_map() {
   ok "Field map is valid."
 }
 
-# set_jsonc KEY VALUE: replace the first  "KEY": "..."  in wrangler.jsonc.
-# Plain IDs / UUIDs / a workers.dev URL only - no awk-sub metacharacters.
-set_jsonc() {
-  local key="$1" value="$2" tmp
-  tmp=$(mktemp)
-  awk -v k="\"$key\":" -v v="$value" '
-    !done && index($0, k) { sub(/: *"[^"]*"/, ": \"" v "\""); done=1 }
-    { print }
-  ' wrangler.jsonc > "$tmp" && mv "$tmp" wrangler.jsonc
-  printf '  %s✓ set%s wrangler.jsonc %s\n' "$GREEN" "$RESET" "$key"
-}
-
 # wr: run wrangler via npx, streaming output.
 wr() { npx --yes wrangler "$@"; }
 
@@ -294,13 +283,13 @@ ct_api_delete() {
 # put_secret NAME VALUE: pipe a value into `wrangler secret put` (no echo).
 put_secret() {
   local out rc=0
-  out=$(printf '%s' "$2" | npx --yes wrangler secret put "$1" 2>&1) || rc=$?
-  { printf '\n$ wrangler secret put %s   (exit %s, %s)\n' "$1" "$rc" "$(date +%H:%M:%S)"; printf '%s\n' "$out"; } >> "$WIZARD_DETAILS"
+  out=$(printf '%s' "$2" | npx --yes wrangler secret put "$1" --config wrangler.deploy.json 2>&1) || rc=$?
+  { printf '\n$ wrangler secret put %s --config wrangler.deploy.json   (exit %s, %s)\n' "$1" "$rc" "$(date +%H:%M:%S)"; printf '%s\n' "$out"; } >> "$WIZARD_DETAILS"
   if (( rc == 0 )); then
     ok "Stored $3 on Cloudflare."
   else
-    fail "Couldn't store $3 - run: printf %s '<value>' | npx wrangler secret put $1"
-    SKIPPED+=("Cloudflare secret $1: printf %s '<value>' | npx wrangler secret put $1")
+    fail "Couldn't store $3 - run: printf %s '<value>' | npx wrangler secret put $1 --config wrangler.deploy.json"
+    SKIPPED+=("Cloudflare secret $1: printf %s '<value>' | npx wrangler secret put $1 --config wrangler.deploy.json")
   fi
 }
 
@@ -447,7 +436,7 @@ todo "In Connecteam, open Settings > Custom Publishers." \
 open_url "https://app.connecteam.com/#/settings"
 printf '\n'
 ask CT_CUSTOM_PUBLISHER_ID "Paste the custom publisher ID:"
-save CT_CUSTOM_PUBLISHER_ID "$CT_CUSTOM_PUBLISHER_ID" "the sender" jsonc
+save CT_CUSTOM_PUBLISHER_ID "$CT_CUSTOM_PUBLISHER_ID" "the sender"
 next_up "the chat channel for your payroll admins."
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -468,7 +457,7 @@ if [[ "$CHANNEL_LIST" == *"(none found)"* ]]; then
   warn "No chat channels found - create \"EH Sync Alerts\" first, then come back here."
 fi
 ask ADMIN_CONNECTEAM_CHANNEL_ID "Paste the \"EH Sync Alerts\" channel ID:"
-save ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID" "the alerts channel" jsonc
+save ADMIN_CONNECTEAM_CHANNEL_ID "$ADMIN_CONNECTEAM_CHANNEL_ID" "the alerts channel"
 next_up "the onboarding pack your new employees fill in."
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -487,7 +476,7 @@ if [[ "$PACK_LIST" == *"(none found)"* ]]; then
   warn "No onboarding packs found - create one with an approval step, then come back here."
 fi
 ask CT_ONBOARDING_PACK_ID "Paste the onboarding pack ID:"
-save CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID" "the onboarding pack" jsonc
+save CT_ONBOARDING_PACK_ID "$CT_ONBOARDING_PACK_ID" "the onboarding pack"
 # Keep an existing secret on a re-run: a new one would no longer match the
 # webhook Connecteam already has, and every delivery would get a 401 (#82).
 if CT_WEBHOOK_SECRET=$(_existing CT_WEBHOOK_SECRET) && [[ -n "$CT_WEBHOOK_SECRET" ]]; then
@@ -596,7 +585,7 @@ if [[ -z "$v" || "$v" == "TODO" ]]; then
   ask EH_BUSINESS_ID "Enter the Employment Hero business ID:"
   v="$EH_BUSINESS_ID"
 fi
-save EH_BUSINESS_ID "$v" "the Employment Hero business" jsonc
+save EH_BUSINESS_ID "$v" "the Employment Hero business"
 next_up "pay-run settings."
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -635,16 +624,24 @@ if [[ -z "$db_id" ]] && wr_quiet d1 list --json; then
   db_id=$(printf '%s' "$WR_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const d=JSON.parse(s.slice(s.indexOf("[")));const m=d.find(x=>x.name==="eh-webhook");console.log(m?m.uuid||m.database_id||"":"")}catch(e){console.log("")}})')
 fi
 if [[ -n "$db_id" ]]; then
-  set_jsonc database_id "$db_id" >/dev/null
+  write_env D1_DATABASE_ID "$db_id" >/dev/null
 else
-  warn "Put the database ID into wrangler.jsonc by hand (npx wrangler d1 list shows it)."
+  fail "Couldn't read the database ID. Add D1_DATABASE_ID=<id> to .dev.vars by hand"
+  fail "(npx wrangler d1 list shows it), then re-run the wizard."
+  exit 1
+fi
+
+# Every remote command from here uses wrangler.deploy.json, built from the
+# wrangler.jsonc template + .dev.vars and checked against this account.
+if ! out=$(npm run --silent deploy:config -- --check-live 2>&1); then
+  fail "The deploy settings aren't ready:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
 fi
 
 # Its setup steps (migrations). Read-only first: a fresh database has all of
 # them pending, a live one usually none. wr_quiet answers wrangler's
 # "may not be available during the migration, continue?" with its fallback,
 # yes - the only sensible answer for a brand-new, empty database.
-wr_quiet d1 migrations list eh-webhook --remote || { fail "Couldn't read the database's setup steps:"; show_wr_tail; exit 1; }
+wr_quiet d1 migrations list eh-webhook --remote --config wrangler.deploy.json || { fail "Couldn't read the database's setup steps:"; show_wr_tail; exit 1; }
 pending=$(printf '%s\n' "$WR_OUT" | { grep -oE '[0-9]{4}_[A-Za-z0-9_]+\.sql' || true; } | sort -u | wc -l | tr -d ' ')
 if [[ "$WR_OUT" == *"No migrations to apply"* || "$pending" -eq 0 ]]; then
   ok "Database is up to date."
@@ -655,7 +652,7 @@ else
     warn "pause syncing for a few seconds."
     confirm "Update the storage now" || { warn "Stopped here - the new version needs this update before it can be deployed."; exit 1; }
   fi
-  if wr_quiet d1 migrations apply eh-webhook --remote; then
+  if wr_quiet d1 migrations apply eh-webhook --remote --config wrangler.deploy.json; then
     ok "Database set up ($pending step(s))."
   else
     fail "Couldn't set up the database:"; show_wr_tail; exit 1
@@ -677,12 +674,17 @@ stage "Push secrets + deploy"
 why "This puts the sync live on your Cloudflare account and stores the two API" \
     "keys and the webhook secret there, where only the sync can read them."
 printf '\n'
+# Rebuilt now: earlier stages may have changed a value since the storage stage. The secrets
+# below go to the Worker that config names, so they use it too.
+if ! out=$(npm run --silent deploy:config -- --check-live 2>&1); then
+  fail "The deploy settings aren't ready:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
+fi
 put_secret CT_API_KEY "$CT_API_KEY" "the Connecteam API key"
 put_secret EH_API_KEY "$EH_API_KEY" "the Employment Hero API key"
 put_secret CT_WEBHOOK_SECRET "$CT_WEBHOOK_SECRET" "the webhook secret"
 printf '\n'
 say "Deploying (this takes about a minute)..."
-wr_quiet deploy || { fail "The deploy failed:"; show_wr_tail; exit 1; }
+wr_quiet deploy --config wrangler.deploy.json || { fail "The deploy failed:"; show_wr_tail; exit 1; }
 WORKER_URL=$(printf '%s' "$WR_OUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)
 if [[ -n "$WORKER_URL" ]]; then
   ok "Deployed: $WORKER_URL"

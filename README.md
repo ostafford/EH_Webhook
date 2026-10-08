@@ -55,8 +55,11 @@ npx wrangler deploy --dry-run  # build + validate bindings
   worked example.
 - `test/fixtures/` — synthetic Connecteam data only; never real employee data.
 
-Config: non-secret IDs in `wrangler.jsonc` `vars`; secrets (`CT_API_KEY`,
-`EH_API_KEY`, `CT_WEBHOOK_SECRET`) via `wrangler secret put`.
+Config: `wrangler.jsonc` is a blank template. A deployment's non-secret IDs
+(and its `D1_DATABASE_ID`) live in the git-ignored `.dev.vars`, and
+`npm run deploy` builds `wrangler.deploy.json` from the two, checking it against
+the live Worker first (RUNBOOK §5). Never `wrangler deploy` the template.
+Secrets (`CT_API_KEY`, `EH_API_KEY`, `CT_WEBHOOK_SECRET`) via `wrangler secret put`.
 
 Stack: TypeScript · Hono · Cloudflare Workers + Queues + D1 · Drizzle · Vitest.
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
