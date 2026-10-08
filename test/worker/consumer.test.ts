@@ -204,7 +204,7 @@ describe("queue consumer (in workerd, real D1)", () => {
 
     expect(out.status).toBe("synced");
     expect(good.sent.dms.map((d) => d.text)).toEqual([
-      "Thanks, that's fixed: your bank details have now been updated in Employment Hero.\nThis is an automated message from the Employment Hero sync.",
+      "Thanks, that's fixed: your bank details have now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.",
     ]);
     const row = await env.DB.prepare("SELECT failure_cycle_count FROM employee_map WHERE ct_user_id = ?")
       .bind(syntheticUser.userId)

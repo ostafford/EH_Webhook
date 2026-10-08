@@ -155,7 +155,7 @@ export function correctionMessage(fields: EhFieldError[], profilePath: string, n
     ["Hi - a few of the details you entered need a quick fix before they can be saved to Employment Hero:"],
     lines,
     [
-      `To fix: go to ${profilePath} and update ${lines.length === 1 ? "it" : "them"}. We'll sync again automatically once you save.`,
+      `To fix: go to ${profilePath} and update ${lines.length === 1 ? "it" : "them"}.\nWe'll sync again automatically once you save.`,
       ...noteLines(note),
     ],
   );
@@ -195,12 +195,13 @@ export function managerEscalationMessage(fields: EhFieldError[], ref: PersonRef 
 export function followUpNoticeMessage(reasons: string[], ref: PersonRef): string {
   const items =
     reasons.length > 0 ? reasons : ["A payroll admin needs to review this record in Employment Hero."];
-  const body = [
-    `Employment Hero follow-up needed for ${personLabel(ref)}:`,
-    ...items.map((r) => `- ${r}`),
-    "The sync completed with safe defaults - finish this by hand in Employment Hero.",
-  ].join("\n");
-  return clamp(body);
+  return clamp(
+    sections(
+      `Employment Hero follow-up needed for ${personLabel(ref)}:`,
+      bulletList(items),
+      "The sync completed with safe defaults - finish this by hand in Employment Hero.",
+    ),
+  );
 }
 
 /** Resolved notice -> the admin channel, when the daily recheck (#43) finds a follow-up now Complete in EH. */
@@ -210,12 +211,13 @@ export function resolvedNoticeMessage(ref: PersonRef, status: string): string {
 
 /** System alert -> the admin channel, when a queue message dead-letters. */
 export function systemAlertMessage(detail: string, ref: PersonRef): string {
-  const body = [
-    `Employment Hero sync failed for ${personLabel(ref)} and could not be retried.`,
-    detail.trim() ? `Detail: ${detail.trim()}` : "No further detail was returned.",
-    "No employee action is possible - check the Employment Hero API status and credentials.",
-  ].join("\n");
-  return clamp(body);
+  return clamp(
+    sections(
+      `Employment Hero sync failed for ${personLabel(ref)} and could not be retried.`,
+      detail.trim() ? `Detail: ${detail.trim()}` : "No further detail was returned.",
+      "No employee action is possible - check the Employment Hero API status and credentials.",
+    ),
+  );
 }
 
 /**
@@ -227,12 +229,13 @@ export function systemAlertMessage(detail: string, ref: PersonRef): string {
  * `SyncGateway.findByEhEmployeeId`.
  */
 export function collisionAlertMessage(ehEmployeeId: string, ref: PersonRef, otherCtUserId: number): string {
-  const body = [
-    `The sync for ${personLabel(ref)} landed on Employment Hero employee ${ehEmployeeId}, which is already linked to a different Connecteam user (id ${otherCtUserId}).`,
-    "Employment Hero likely matched them by a duplicate value (e.g. the same Tax File Number) instead of creating a separate record.",
-    "No employee action is possible - a payroll admin must check and separate these two records directly in Employment Hero.",
-  ].join("\n");
-  return clamp(body);
+  return clamp(
+    sections(
+      `The sync for ${personLabel(ref)} landed on Employment Hero employee ${ehEmployeeId}, which is already linked to a different Connecteam user (id ${otherCtUserId}).`,
+      "Employment Hero likely matched them by a duplicate value (e.g. the same Tax File Number) instead of creating a separate record.",
+      "No employee action is possible - a payroll admin must check and separate these two records directly in Employment Hero.",
+    ),
+  );
 }
 
 /**
@@ -246,8 +249,22 @@ function noteLines(note: string): string[] {
 
 /** A short message plus its automated note, the note kept whole if the body is cut. */
 function withNote(body: string, note: string): string {
-  const tail = noteLines(note).map((l) => `\n${l}`).join("");
+  const tail = noteLines(note).map((l) => `${GAP}${l}`).join("");
   return `${clamp(body, MAX_LEN - tail.length)}${tail}`;
+}
+
+/**
+ * A blank line between a message's parts: Connecteam chat keeps line breaks,
+ * and without the gap a message reads as one block.
+ */
+const GAP = "\n\n";
+
+function sections(...parts: string[]): string {
+  return parts.filter((p) => p.trim()).join(GAP);
+}
+
+export function bulletList(items: readonly string[]): string {
+  return items.map((l) => `• ${l}`).join("\n");
 }
 
 /**
@@ -258,8 +275,7 @@ function withNote(body: string, note: string): string {
 function fitList(head: string[], items: string[], foot: string[]): string {
   const render = (kept: string[]) => {
     const more = items.length - kept.length;
-    const bullets = [...kept, ...(more > 0 ? [`...and ${more} more`] : [])];
-    return [...head, ...bullets.map((l) => `- ${l}`), ...foot].join("\n");
+    return sections(...head, bulletList([...kept, ...(more > 0 ? [`...and ${more} more`] : [])]), ...foot);
   };
   let kept = items;
   while (kept.length > 1 && render(kept).length > MAX_LEN) kept = kept.slice(0, -1);

@@ -73,9 +73,12 @@ describe("correctionMessage", () => {
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
       "Hi - a few of the details you entered need a quick fix before they can be saved to Employment Hero:
-      - Your bank BSB doesn't look right - check it's the 6-digit branch number for your account.
-      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
-      To fix: go to Profile > Personal Information and update them. We'll sync again automatically once you save."
+
+      • Your bank BSB doesn't look right - check it's the 6-digit branch number for your account.
+      • Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
+
+      To fix: go to Profile > Personal Information and update them.
+      We'll sync again automatically once you save."
     `);
   });
 
@@ -100,8 +103,11 @@ describe("managerEscalationMessage", () => {
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
       "Heads up: an employee you manage has had their details fail to sync to Employment Hero three times in a row.
+
       They've been asked to correct:
-      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
+
+      • Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
+
       Please check in with them so their Employment Hero record can be completed."
     `);
   });
@@ -120,8 +126,10 @@ describe("followUpNoticeMessage", () => {
     expect(msg).toContain("17760356");
     expect(msg).toMatchInlineSnapshot(`
       "Employment Hero follow-up needed for Connecteam user 17760356:
-      - Employee marked "not an Australian resident for tax" - set the foreign-resident or working-holiday-maker tax scale in Employment Hero.
-      - Self-managed super fund (fund ABN given, no USI) - add the SMSF to the employee in Employment Hero manually.
+
+      • Employee marked "not an Australian resident for tax" - set the foreign-resident or working-holiday-maker tax scale in Employment Hero.
+      • Self-managed super fund (fund ABN given, no USI) - add the SMSF to the employee in Employment Hero manually.
+
       The sync completed with safe defaults - finish this by hand in Employment Hero."
     `);
   });
@@ -143,7 +151,9 @@ describe("systemAlertMessage", () => {
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
       "Employment Hero sync failed for Connecteam user 42 and could not be retried.
+
       Detail: EH 503: service unavailable
+
       No employee action is possible - check the Employment Hero API status and credentials."
     `);
   });
@@ -190,8 +200,8 @@ describe("length clamping", () => {
     const msg = correctionMessage(many, PATH, NOTE);
     expect(msg.length).toBeLessThanOrEqual(500);
     // Bullets are dropped, not the closing line: the employee still learns where to go.
-    expect(msg).toMatch(/\n- \.\.\.and \d+ more\n/);
-    expect(msg.endsWith(`To fix: go to ${PATH} and update them. We'll sync again automatically once you save.\n${NOTE}`)).toBe(true);
+    expect(msg).toMatch(/\n• \.\.\.and \d+ more\n/);
+    expect(msg.endsWith(`To fix: go to ${PATH} and update them.\nWe'll sync again automatically once you save.\n\n${NOTE}`)).toBe(true);
   });
 });
 
@@ -271,18 +281,18 @@ describe("automated note", () => {
       correctionFixedMessage(["tax file number"], NOTE),
       correctionFixedMessage([], NOTE),
     ]) {
-      expect(text.endsWith(`\n${NOTE}`)).toBe(true);
+      expect(text.endsWith(`\n\n${NOTE}`)).toBe(true);
     }
   });
 
   it("reads as the last line of a first-sync message", () => {
     expect(firstSyncMessage(NOTE)).toBe(
-      "Thanks, your details have now been received in Employment Hero.\nThis is an automated message from the Employment Hero sync.",
+      "Thanks, your details have now been received in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.",
     );
   });
 
   it("a client's own wording replaces it, and blank leaves it off", () => {
-    expect(firstSyncMessage("Sent automatically by Acme HR.")).toMatch(/\nSent automatically by Acme HR\.$/);
+    expect(firstSyncMessage("Sent automatically by Acme HR.")).toMatch(/\n\nSent automatically by Acme HR\.$/);
     expect(firstSyncMessage("")).toBe("Thanks, your details have now been received in Employment Hero.");
     expect(firstSyncMessage("   ")).toBe("Thanks, your details have now been received in Employment Hero.");
   });

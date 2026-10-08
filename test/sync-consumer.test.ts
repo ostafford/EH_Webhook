@@ -585,7 +585,7 @@ describe("runSyncJob - read-back mismatch", () => {
 
     expect(out.status).toBe("synced");
     // No Correction - only the first-sync success message (#71).
-    expect(ct.dms.map((d) => d.text)).toEqual(["Thanks, your details have now been received in Employment Hero.\nThis is an automated message from the Employment Hero sync."]);
+    expect(ct.dms.map((d) => d.text)).toEqual(["Thanks, your details have now been received in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
   });
 });
 
@@ -1117,7 +1117,7 @@ describe("retry backoff (issue #90)", () => {
 });
 
 describe("runSyncJob - employee success message (issue #71)", () => {
-  const FIRST = "Thanks, your details have now been received in Employment Hero.\nThis is an automated message from the Employment Hero sync.";
+  const FIRST = "Thanks, your details have now been received in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.";
   const nonResident = (): ConnecteamUser => {
     const u = cloneUser();
     u.customFields.find((f) => f.customFieldId === 42923315)!.value = [{ id: 1, value: "No" }];
@@ -1184,7 +1184,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
 
     expect(out.status).toBe("synced");
     expect(dmsTo(ct)).toEqual([
-      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.\nThis is an automated message from the Employment Hero sync.",
+      "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync.",
     ]);
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
   });
@@ -1199,7 +1199,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(1);
 
     expect((await attempt()).status).toBe("synced");
-    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\nThis is an automated message from the Employment Hero sync."]);
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
     expect(store.rows.get(17760356)!.failureCycleCount).toBe(0);
   });
 
@@ -1211,7 +1211,7 @@ describe("runSyncJob - employee success message (issue #71)", () => {
 
     expect((await attempt()).status).toBe("retry");
     expect((await attempt()).status).toBe("follow_up");
-    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\nThis is an automated message from the Employment Hero sync."]);
+    expect(dmsTo(ct)).toEqual(["Thanks, that's fixed: your tax file number has now been updated in Employment Hero.\n\nThis is an automated message from the Employment Hero sync."]);
     expect(ct.channels).toHaveLength(1);
   });
 
