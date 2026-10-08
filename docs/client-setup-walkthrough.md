@@ -31,7 +31,7 @@ webhook, and up to 15 for Cloudflare to start the first approval check
 |---|---|---|---|---|
 | 1 | Cloudflare account | Signs in when a browser tab opens | Their own account name. **Check it**: the deploy goes to whatever account this shows | 1–2 min |
 | 2 | Connecteam: API key | Creates a key, pastes it (hidden) | — | 1–2 min |
-| 3 | Connecteam: custom publisher | Creates the "EH Sync" publisher, pastes its ID | — | 1–2 min |
+| 3 | Connecteam: custom publisher | Creates the "Employment Hero Sync (Automated)" publisher, pastes its ID | — | 1–2 min |
 | 4 | Connecteam: alerts channel | Creates "EH Sync Alerts", picks it from the list | — | 1–2 min |
 | 5 | Connecteam: onboarding pack | Picks the pack from the list | A webhook secret is created (or kept, on a re-run) | 1 min |
 | 6 | Employment Hero: API key | Creates a key, pastes it (hidden) | — | 1–2 min |

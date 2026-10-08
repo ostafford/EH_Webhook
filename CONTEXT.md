@@ -35,7 +35,10 @@ Second message type. Posted to the admin **channel**. For data that synced fine 
 Third message type. Posted to the admin **channel**. For failures the employee cannot fix — EH outage, auth failure, bugs — raised when a queue message dead-letters.
 
 **Success message**:
-Fourth message type (issue #71). A one-off DM to the **employee**: once on their first successful sync ("received in Employment Hero"), and once when a Correction cycle is fixed, naming what the Correction asked about ("your bank details have now been updated in Employment Hero"). Never on an ordinary edit, never to the admin channel, and never claims the record is Complete. Per client: `messages.employeeSuccess` in `field-map.json` (on unless set to `false`).
+Fourth message type (issue #71). A one-off DM to the **employee**: once on their first successful sync ("received in Employment Hero"), and once when a Correction cycle is fixed, naming what the Correction asked about ("your bank details have now been updated in Employment Hero"). Never on an ordinary edit, and never claims the record is Complete. Per client: `messages.employeeSuccess` in `field-map.json` (on unless set to `false`).
+
+**Admin success notice**:
+The admin-channel twin of the Success message: a ✅ naming the employee at the same two moments, so an admin sees each new hire land. Not posted when the sync lands as a Manual follow-up (that notice says the sync completed). Per client: `messages.adminSuccess` in `field-map.json` (on unless set to `false`).
 _Avoid_: confirmation, receipt
 
 **Custom publisher**:

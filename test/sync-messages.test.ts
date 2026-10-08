@@ -11,8 +11,14 @@ import {
   correctionTopics,
   firstSyncMessage,
   correctionFixedMessage,
+  adminFirstSyncMessage,
+  adminCorrectionFixedMessage,
 } from "../src/sync/messages.js";
+import { DEFAULT_AUTOMATED_NOTE, DEFAULT_PROFILE_PATH } from "../src/mapping/schema.js";
 import type { EhFieldError } from "../src/eh/errors.js";
+
+const PATH = DEFAULT_PROFILE_PATH;
+const NOTE = DEFAULT_AUTOMATED_NOTE;
 
 describe("personLabel", () => {
   it("is 'First Last (id)' when a name is known", () => {
@@ -63,13 +69,13 @@ describe("correctionMessage", () => {
       { field: "bankAccount1_BSB", reason: "BSB must contain 6 digits only" },
       { field: "bankAccount1_BSB", reason: "BSB is invalid" },
       { field: "taxFileNumber", reason: "The tax file number is invalid." },
-    ]);
+    ], PATH, "");
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
       "Hi - a few of the details you entered need a quick fix before they can be saved to Employment Hero:
-      - Your bank BSB doesn't look right - check it's the 6-digit branch number for your account and re-enter it in Connecteam.
-      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits and re-enter it in Connecteam.
-      Update them in Connecteam and we'll sync again automatically."
+      - Your bank BSB doesn't look right - check it's the 6-digit branch number for your account.
+      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
+      To fix: go to Profile > Personal Information and update them. We'll sync again automatically once you save."
     `);
   });
 
@@ -77,25 +83,25 @@ describe("correctionMessage", () => {
     const msg = correctionMessage([
       { field: "startDate", reason: "is required" },
       { field: "mysteryField", reason: "nope" },
-    ]);
+    ], PATH, "");
     expect(msg).toContain("start date");
     expect(msg).not.toContain(GENERIC_CORRECTION);
   });
 
   it("uses the generic line alone when nothing is recognised", () => {
-    const msg = correctionMessage([{ field: "mysteryField", reason: "nope" }]);
+    const msg = correctionMessage([{ field: "mysteryField", reason: "nope" }], PATH, "");
     expect(msg).toContain(GENERIC_CORRECTION);
   });
 });
 
 describe("managerEscalationMessage", () => {
   it("frames it for the manager and lists the stuck fields, under 500 chars", () => {
-    const msg = managerEscalationMessage([{ field: "taxFileNumber", reason: "invalid" }]);
+    const msg = managerEscalationMessage([{ field: "taxFileNumber", reason: "invalid" }], undefined, "");
     expect(msg.length).toBeLessThanOrEqual(500);
     expect(msg).toMatchInlineSnapshot(`
       "Heads up: an employee you manage has had their details fail to sync to Employment Hero three times in a row.
       They've been asked to correct:
-      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits and re-enter it in Connecteam.
+      - Your Tax File Number doesn't appear to be valid - re-check the 9 digits.
       Please check in with them so their Employment Hero record can be completed."
     `);
   });
@@ -160,7 +166,7 @@ describe("collisionAlertMessage", () => {
 });
 
 describe("length clamping", () => {
-  it("truncates an over-long correction with an ellipsis", () => {
+  it("keeps the 'where to fix it' line when a correction runs long", () => {
     // One error in every curated bucket - the composed message runs well past 500.
     const many: EhFieldError[] = [
       { field: "bankAccount1_BSB", reason: "bad" },
@@ -181,9 +187,28 @@ describe("length clamping", () => {
       { field: "emergencyContact1_Name", reason: "bad" },
       { field: "surname", reason: "bad" },
     ];
-    const msg = correctionMessage(many);
+    const msg = correctionMessage(many, PATH, NOTE);
     expect(msg.length).toBeLessThanOrEqual(500);
-    expect(msg.endsWith("…")).toBe(true);
+    // Bullets are dropped, not the closing line: the employee still learns where to go.
+    expect(msg).toMatch(/\n- \.\.\.and \d+ more\n/);
+    expect(msg.endsWith(`To fix: go to ${PATH} and update them. We'll sync again automatically once you save.\n${NOTE}`)).toBe(true);
+  });
+});
+
+describe("admin success notice", () => {
+  const ref = { ctUserId: 42, firstName: "Jane", lastName: "Smith" };
+
+  it("first sync names the person", () => {
+    expect(adminFirstSyncMessage(ref)).toBe("✅ Jane Smith (42) has synced to Employment Hero.");
+  });
+
+  it("a fix names what was fixed, or 'details' when nothing is known", () => {
+    expect(adminCorrectionFixedMessage(ref, ["tax file number"])).toBe(
+      "✅ Jane Smith (42) fixed their tax file number and has now synced to Employment Hero.",
+    );
+    expect(adminCorrectionFixedMessage(ref, [])).toBe(
+      "✅ Jane Smith (42) fixed their details and has now synced to Employment Hero.",
+    );
   });
 });
 
@@ -191,28 +216,28 @@ describe("employee success messages (issue #71)", () => {
   const err = (field: string, reason = "invalid"): EhFieldError => ({ field, reason });
 
   it("first sync says the details were received in Employment Hero", () => {
-    expect(firstSyncMessage()).toBe("Thanks, your details have now been received in Employment Hero.");
+    expect(firstSyncMessage("")).toBe("Thanks, your details have now been received in Employment Hero.");
   });
 
   it("a fix names the topics the Correction asked about, in the order asked", () => {
     const topics = correctionTopics([err("bankAccounts[0].bsb"), err("taxFileNumber")]);
     expect(topics).toEqual(["bank details", "tax file number"]);
-    expect(correctionFixedMessage(topics)).toBe(
+    expect(correctionFixedMessage(topics, "")).toBe(
       "Thanks, that's fixed: your bank details and tax file number have now been updated in Employment Hero.",
     );
   });
 
   it("agrees the verb with a single singular topic", () => {
-    expect(correctionFixedMessage(["tax file number"])).toBe(
+    expect(correctionFixedMessage(["tax file number"], "")).toBe(
       "Thanks, that's fixed: your tax file number has now been updated in Employment Hero.",
     );
-    expect(correctionFixedMessage(["bank details"])).toBe(
+    expect(correctionFixedMessage(["bank details"], "")).toBe(
       "Thanks, that's fixed: your bank details have now been updated in Employment Hero.",
     );
   });
 
   it("lists three or more topics with commas", () => {
-    expect(correctionFixedMessage(["address", "email address", "super details"])).toBe(
+    expect(correctionFixedMessage(["address", "email address", "super details"], "")).toBe(
       "Thanks, that's fixed: your address, email address and super details have now been updated in Employment Hero.",
     );
   });
@@ -223,14 +248,54 @@ describe("employee success messages (issue #71)", () => {
     ]);
     expect(correctionTopics([err("residentialPostCode"), err("residentialSuburb")])).toEqual(["address"]);
     expect(correctionTopics([err("somethingUnheardOf", "odd")])).toEqual([]);
-    expect(correctionFixedMessage([])).toBe(
+    expect(correctionFixedMessage([], "")).toBe(
       "Thanks, that's fixed: your details have now been updated in Employment Hero.",
     );
   });
 
   it("never claims the record is Complete (an Incomplete record awaiting an admin is still a success)", () => {
-    for (const text of [firstSyncMessage(), correctionFixedMessage(["bank details"]), correctionFixedMessage([])]) {
+    for (const text of [firstSyncMessage(""), correctionFixedMessage(["bank details"], ""), correctionFixedMessage([], "")]) {
       expect(text).not.toMatch(/complete/i);
+    }
+  });
+});
+
+describe("automated note", () => {
+  const tfn: EhFieldError[] = [{ field: "taxFileNumber", reason: "invalid" }];
+
+  it("ends every message to a person", () => {
+    for (const text of [
+      correctionMessage(tfn, PATH, NOTE),
+      managerEscalationMessage(tfn, undefined, NOTE),
+      firstSyncMessage(NOTE),
+      correctionFixedMessage(["tax file number"], NOTE),
+      correctionFixedMessage([], NOTE),
+    ]) {
+      expect(text.endsWith(`\n${NOTE}`)).toBe(true);
+    }
+  });
+
+  it("reads as the last line of a first-sync message", () => {
+    expect(firstSyncMessage(NOTE)).toBe(
+      "Thanks, your details have now been received in Employment Hero.\nThis is an automated message from the Employment Hero sync.",
+    );
+  });
+
+  it("a client's own wording replaces it, and blank leaves it off", () => {
+    expect(firstSyncMessage("Sent automatically by Acme HR.")).toMatch(/\nSent automatically by Acme HR\.$/);
+    expect(firstSyncMessage("")).toBe("Thanks, your details have now been received in Employment Hero.");
+    expect(firstSyncMessage("   ")).toBe("Thanks, your details have now been received in Employment Hero.");
+  });
+
+  it("isn't added to admin-channel messages", () => {
+    const ref = { ctUserId: 42, firstName: "Jane", lastName: "Smith" };
+    for (const text of [
+      adminFirstSyncMessage(ref),
+      adminCorrectionFixedMessage(ref, ["tax file number"]),
+      followUpNoticeMessage(["x"], ref),
+      systemAlertMessage("detail", ref),
+    ]) {
+      expect(text).not.toContain("automated message");
     }
   });
 });

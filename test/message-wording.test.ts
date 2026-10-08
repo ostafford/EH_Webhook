@@ -18,8 +18,8 @@ describe("names Employment Hero, not 'payroll'", () => {
     const fields: EhFieldError[] = [{ field: "somethingUnheardOf", reason: "odd" }];
     const messages = [
       GENERIC_CORRECTION,
-      correctionMessage(fields),
-      managerEscalationMessage(fields, ref),
+      correctionMessage(fields, "Profile > Personal Information", "This is an automated message from the Employment Hero sync."),
+      managerEscalationMessage(fields, ref, "This is an automated message from the Employment Hero sync."),
       followUpNoticeMessage([], ref),
       systemAlertMessage("detail", ref),
       collisionAlertMessage("555", ref, 9),

@@ -105,8 +105,8 @@ the missing fields (2f) and the award dropdown (§3). → **`CT_API_KEY`**
 (Cloudflare secret).
 
 ### 2b. Custom publisher — *the sender of every message*
-Settings → Custom Publishers → create one named e.g. **"EH Sync"**.
-Note its **publisher ID**.
+Settings → Custom Publishers → create one named **"Employment Hero Sync
+(Automated)"**. Note its **publisher ID**.
 
 - **What it is:** a named non-human sender that the Connecteam chat API can post as.
 - **What it's for:** the sync sends three kinds of message — the **Correction
@@ -116,6 +116,10 @@ Note its **publisher ID**.
 - **Why this way:** the chat API can only post as a real user or a custom
   publisher. A custom publisher means no staff member's name is attached to
   automated payroll messages, and the sender can't leave the company.
+- **Why "(Automated)":** the sender name is what shows on a phone notification,
+  before anyone opens the message. Messages to a person also end with a closing
+  line saying they were sent automatically (`messages.automatedNote` in
+  `field-map.json`, below), so it's clear both before and after opening.
 
 → **`CT_CUSTOM_PUBLISHER_ID`** (`wrangler.jsonc` var).
 
@@ -549,6 +553,18 @@ minutes for the rest of the digest day (UTC). The Worker logs
 | **System alert** | alerts channel | check Employment Hero API status / credentials; once fixed, replay the dead-lettered job — re-posted at most once per hour per employee while the fault persists |
 | **Identity-collision alert** | alerts channel | two Connecteam people's EH records got merged into one (see below) — separate them directly in EH; re-posted at most once per hour per employee while it persists |
 | **Success message** | the employee (DM) | none. Sent once on their first successful sync, and once when a Correction is fixed (naming what was fixed). Off for a client with `"messages": { "employeeSuccess": false }` in `field-map.json`; on otherwise. Never sent for an ordinary edit |
+| **Admin success notice** | alerts channel | none. A ✅ naming the employee at the same two moments as the Success message; skipped when the sync lands as a Manual follow-up. Off with `"adminSuccess": false`; on otherwise. **On go-live every existing employee syncs at once**, so for a large client set it to `false` for the first run and switch it on afterwards |
+
+Every Correction message ends with where to fix it: "To fix: go to
+**Profile > Personal Information** and update it." Profile sections are the
+client's own choice, so set `"messages": { "profilePath": "..." }` in
+`field-map.json` to match their app. A long Correction drops bullets ("...and
+3 more") rather than losing that line.
+
+Every message to a person (Correction, manager escalation, Success message)
+ends: "This is an automated message from the Employment Hero sync." That
+default suits any client; set `"messages": { "automatedNote": "..." }` for
+their own wording, or `""` for none. Admin-channel messages don't carry it.
 
 > **Identity-collision alert.** Employment Hero's unstructured-employee endpoint
 > matches/merges by **Tax File Number**, not by the `externalId` this sync sends

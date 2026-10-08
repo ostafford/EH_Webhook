@@ -35,6 +35,7 @@ export type NoticeKind =
   | "correction"
   | "manager_escalation"
   | "employee_success"
+  | "admin_success"
   | "follow_up"
   | "system_alert"
   | "collision";
